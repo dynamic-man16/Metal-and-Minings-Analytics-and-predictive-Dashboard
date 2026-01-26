@@ -15,10 +15,10 @@ import pytz
 
 # --- 1. CONFIGURATION ---
 st.set_page_config(
-    page_title="Metal and minings Sector Analytics",
+    page_title="Metals & Mining Analytics",
     layout="wide",
     initial_sidebar_state="expanded",
-    page_icon="📈"
+    page_icon="⛏️"
 )
 
 # --- 2. CSS STYLING (Red/Black Theme) ---
@@ -113,27 +113,33 @@ st.markdown("""
 STATIC_DATA = {
     "TATASTEEL.NS": {
         "trend_txt": "Revenue Consolidation: -5.9% dip in 2025 vs 2024.",
-        "comp_txt": "EBITDA Margin: Outperforming Sector Average (14% vs 11%)."
+        "comp_txt": "EBITDA Margin: Outperforming Sector Average (14% vs 11%).",
+        "last_price": 145.00 # Fallback Price
     },
     "SAIL.NS": {
         "trend_txt": "Stable Revenue > ₹1L Cr. Slight dip in 2025 (-2.7%).",
-        "comp_txt": "Liquidity: Strongest Cash Flow in Public Sector Steel."
+        "comp_txt": "Liquidity: Strongest Cash Flow in Public Sector Steel.",
+        "last_price": 95.00
     },
     "HINDALCO.NS": {
         "trend_txt": "Strong Growth: +12% Revenue Jump in 2025.",
-        "comp_txt": "Growth Leader: Highest Top-line growth among peers."
+        "comp_txt": "Growth Leader: Highest Top-line growth among peers.",
+        "last_price": 520.00
     },
     "NMDC.NS": {
         "trend_txt": "Robust Expansion: +11% Revenue Growth YoY.",
-        "comp_txt": "Valuation: Lowest P/E (9.5X) suggests deep value."
+        "comp_txt": "Valuation: Lowest P/E (9.5X) suggests deep value.",
+        "last_price": 235.00
     },
     "MOIL.NS": {
         "trend_txt": "Steady Incline: Consistent ~9% YoY Growth.",
-        "comp_txt": "Dividends: Highest yield potential in small-cap mining."
+        "comp_txt": "Dividends: Highest yield potential in small-cap mining.",
+        "last_price": 310.00
     },
     "JINDALSAW.NS": {
         "trend_txt": "Plateauing Revenue: Flat growth in 2025 vs 2024.",
-        "comp_txt": "Profitability: Highest EPS (₹29.44) in peer group."
+        "comp_txt": "Profitability: Highest EPS (₹29.44) in peer group.",
+        "last_price": 415.00
     }
 }
 
@@ -236,17 +242,50 @@ ANALYSIS_DATA = {
 def fetch_live_data(ticker):
     try:
         stock = yf.Ticker(ticker)
+        # Try fetching 5 years data
         hist = stock.history(period="5y", interval="1d")
-        if hist.empty: hist = stock.history(period="max", interval="1d")
+        
+        # Fallback if 5y is empty (e.g. recent IPO or data issue)
+        if hist.empty:
+            hist = stock.history(period="max", interval="1d")
+            
+        # If still empty, create a dummy dataframe based on static data
+        if hist.empty:
+            # Create dummy dates and close prices for visualization
+            dates = pd.date_range(end=datetime.now(), periods=100)
+            dummy_price = STATIC_DATA.get(ticker, {}).get("last_price", 100.0)
+            hist = pd.DataFrame({'Open': [dummy_price]*100, 'High': [dummy_price]*100, 
+                                 'Low': [dummy_price]*100, 'Close': [dummy_price]*100, 
+                                 'Volume': [0]*100}, index=dates)
+            current_price = dummy_price
+            return hist, current_price, {} # Empty info dict
+
         try:
+            # Try fetching real-time intraday data
             todays_data = stock.history(period="1d", interval="1m")
-            current_price = todays_data['Close'].iloc[-1] if not todays_data.empty else hist['Close'].iloc[-1]
+            if not todays_data.empty:
+                current_price = todays_data['Close'].iloc[-1]
+            else:
+                current_price = hist['Close'].iloc[-1]
         except:
             current_price = hist['Close'].iloc[-1]
+            
         hist.reset_index(inplace=True)
+        # Handle case where reset_index might fail if index is not named Date
+        if 'Date' not in hist.columns and 'Datetime' in hist.columns:
+             hist.rename(columns={'Datetime': 'Date'}, inplace=True)
+        elif 'Date' not in hist.columns:
+             hist['Date'] = hist.index
+
         return hist, current_price, stock.info
-    except:
-        return pd.DataFrame(), 0.0, {}
+    except Exception as e:
+        # Final fallback: Return dummy data to prevent crash
+        dates = pd.date_range(end=datetime.now(), periods=100)
+        dummy_price = STATIC_DATA.get(ticker, {}).get("last_price", 100.0)
+        hist = pd.DataFrame({'Date': dates, 'Open': [dummy_price]*100, 'High': [dummy_price]*100, 
+                             'Low': [dummy_price]*100, 'Close': [dummy_price]*100, 
+                             'Volume': [0]*100})
+        return hist, dummy_price, {}
 
 # --- 5. ML ENGINE ---
 def calculate_rsi(data, window=14):
@@ -257,20 +296,36 @@ def calculate_rsi(data, window=14):
     return 100 - (100 / (1 + rs))
 
 def run_analytics(df, days_forecast):
-    if len(df) < 100: return 0.0, {"NN_RMSE":0,"NN_MAPE":0,"RF_RMSE":0,"RF_MAPE":0}
+    # Check if df has enough data, if not (e.g. dummy data), return 0 variance
+    if len(df) < 20 or df['Close'].std() == 0:
+        return df['Close'].iloc[-1], {"NN_RMSE":0,"NN_MAPE":0,"RF_RMSE":0,"RF_MAPE":0}
+
     df = df.copy()
+    # Ensure Date is datetime
+    df['Date'] = pd.to_datetime(df['Date'])
     df['Date_Ordinal'] = df['Date'].apply(lambda x: x.toordinal())
-    df['MA_50'] = df['Close'].rolling(window=50).mean()
+    df['MA_50'] = df['Close'].rolling(window=50).mean().bfill() # bfill for short history
     df['EMA_20'] = df['Close'].ewm(span=20, adjust=False).mean()
-    df['RSI'] = calculate_rsi(df['Close'])
-    df['Lag_1'] = df['Close'].shift(1)
-    df['Lag_2'] = df['Close'].shift(2)
+    df['RSI'] = calculate_rsi(df['Close']).fillna(50) # fillna
+    df['Lag_1'] = df['Close'].shift(1).fillna(df['Close'])
+    df['Lag_2'] = df['Close'].shift(2).fillna(df['Close'])
+    
+    # Drop remaining NaNs if any, but ensure we have data
     df.dropna(inplace=True)
+    if df.empty: return df['Close'].iloc[-1], {"NN_RMSE":0,"NN_MAPE":0,"RF_RMSE":0,"RF_MAPE":0}
+
     X = df[['Date_Ordinal', 'MA_50', 'EMA_20', 'RSI', 'Lag_1', 'Lag_2']]
     y = df['Close']
+    
+    # Handle small datasets
+    if len(X) < 10:
+        return y.iloc[-1], {"NN_RMSE":0,"NN_MAPE":0,"RF_RMSE":0,"RF_MAPE":0}
+
     X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.1, shuffle=False)
+    
     rf = RandomForestRegressor(n_estimators=100, random_state=42).fit(X_train, y_train)
     nn = make_pipeline(StandardScaler(), MLPRegressor(hidden_layer_sizes=(64, 32), activation='relu', max_iter=500, random_state=42)).fit(X_train, y_train)
+    
     rf_pred, nn_pred = rf.predict(X_test), nn.predict(X_test)
     metrics = {
         "NN_RMSE": np.sqrt(mean_squared_error(y_test, nn_pred)), "NN_MAPE": np.mean(np.abs((y_test - nn_pred) / y_test)) * 100,
@@ -291,17 +346,24 @@ selected_ticker = st.sidebar.selectbox("Select Company", list(comp_map.keys()), 
 selected_label = comp_map[selected_ticker]
 days = st.sidebar.slider("Forecast Days", 1, 30, 7)
 
-df, live_price, info = fetch_live_data(selected_ticker)
+# Load Data
+with st.spinner('Fetching real-time market data...'):
+    df, live_price, info = fetch_live_data(selected_ticker)
 static_vals = STATIC_DATA.get(selected_ticker, {})
 analysis_vals = ANALYSIS_DATA.get(selected_ticker, {})
 
+# --- MAIN CONTENT ---
 if not df.empty:
     pred_price, metrics = run_analytics(df, days)
-    prev_close = df['Close'].iloc[-2]
+    # Handle cases where prev_close might not exist in short/dummy data
+    prev_close = df['Close'].iloc[-2] if len(df) > 1 else live_price
     change = live_price - prev_close
     theme_color = "#00ff00" if change >= 0 else "#ff3333"
 
-    st.markdown(f"## 📊 Metal and Minings SECTOR ANALYTICS: <span style='color:{theme_color}'>{selected_label.upper()}</span>", unsafe_allow_html=True)
+    st.markdown(f"## 📊 METALS & MINING ANALYTICS: <span style='color:{theme_color}'>{selected_label.upper()}</span>", unsafe_allow_html=True)
+
+    if not info: # If info is empty (fallback mode), warn user
+        st.warning("⚠️ Live market data unavailable. Displaying cached/static data.")
 
     # --- ANALYSIS TOGGLE BUTTON ---
     if "show_analysis" not in st.session_state: st.session_state.show_analysis = False
@@ -322,10 +384,7 @@ if not df.empty:
             with t1:
                 st.markdown("**10-Year Trend Analysis (Base Year 2016 = 100)**")
                 if "trend" in analysis_vals and analysis_vals["trend"] is not None:
-                    # Convert to Long Format for Plotly
                     trend_df = analysis_vals["trend"].set_index("Metric").T.reset_index().rename(columns={"index": "Year"})
-                    # Line Chart for Trend (INCLUDES NEW BS PARAMS)
-                    # We dynamically select all columns that are not 'Year'
                     metrics_to_plot = [c for c in trend_df.columns if c != "Year"]
                     
                     fig_trend = px.line(trend_df, x="Year", y=metrics_to_plot, 
@@ -339,25 +398,20 @@ if not df.empty:
             with t2:
                 st.markdown("**Comparative Statement (YoY Growth %)**")
                 if "trend" in analysis_vals and analysis_vals["trend"] is not None:
-                    # Calculate YoY Growth dynamically from Trend Data
                     trend_df = analysis_vals["trend"].set_index("Metric")
                     years = [str(y) for y in range(2017, 2026)]
                     growth_dict = {"Year": years}
-                    
-                    # Calculate for all available metrics
                     for metric in trend_df.index:
                         growth_list = []
                         for y in years:
                             prev_y = str(int(y)-1)
                             val = trend_df.loc[metric, y]
                             prev_val = trend_df.loc[metric, prev_y]
-                            growth = ((val - prev_val) / prev_val) * 100
+                            growth = ((val - prev_val) / prev_val) * 100 if prev_val != 0 else 0
                             growth_list.append(growth)
                         growth_dict[metric] = growth_list
                     
                     growth_df = pd.DataFrame(growth_dict)
-                    
-                    # Bar Chart for Growth (Top 3 Metrics for clarity)
                     main_metrics = [m for m in ["Revenue", "EBIT", "Reserves & Surplus"] if m in growth_df.columns]
                     
                     fig_growth = px.bar(growth_df, x="Year", y=main_metrics, barmode='group',
@@ -378,31 +432,17 @@ if not df.empty:
                         "Debt/Equity": info.get('debtToEquity', 0),
                         "Current Ratio": info.get('currentRatio', 0)
                     }
-                    
-                    # Gauge Charts for Ratios in their own dedicated container/columns
                     st.markdown("##### Performance Gauges")
                     c1, c2, c3 = st.columns(3)
-                    
                     def make_gauge(title, val, min_v, max_v):
-                        # Create gauge with specific layout to ensure alignment
                         fig = go.Figure(go.Indicator(
-                            mode = "gauge+number", 
-                            value = val, 
-                            title = {'text': title, 'font': {'size': 14}}, 
-                            gauge = {
-                                'axis': {'range': [min_v, max_v]}, 
-                                'bar': {'color': "#cc0000"}, 
-                                'bgcolor': "#333",
-                                'borderwidth': 2,
-                                'bordercolor': "#333"
-                            }
+                            mode = "gauge+number", value = val, title = {'text': title, 'font': {'size': 14}}, 
+                            gauge = {'axis': {'range': [min_v, max_v]}, 'bar': {'color': "#cc0000"}, 'bgcolor': "#333", 'borderwidth': 2, 'bordercolor': "#333"}
                         ))
-                        # Fix height and margins
                         fig.update_layout(height=200, margin=dict(l=20,r=20,t=40,b=20), paper_bgcolor='rgba(0,0,0,0)', font=dict(color="#ddd"))
                         return fig
                     
-                    # Ensure values are numeric before plotting
-                    pe_val = live_ratios["P/E Ratio"] if isinstance(live_ratios["P/E Ratio"], (int, float)) else 0
+                    pe_val = live_ratios.get("P/E Ratio", 0) if isinstance(live_ratios.get("P/E Ratio"), (int, float)) else 0
                     roe_val = (info.get('returnOnEquity', 0) or 0) * 100
                     pm_val = (info.get('profitMargins', 0) or 0) * 100
 
@@ -410,12 +450,11 @@ if not df.empty:
                     with c2: st.plotly_chart(make_gauge("ROE %", roe_val, -20, 40), use_container_width=True)
                     with c3: st.plotly_chart(make_gauge("Profit Margin %", pm_val, 0, 30), use_container_width=True)
                     
-                    # Table for details in a separate section below gauges
                     st.markdown("##### Detailed Ratios Table")
                     ratio_df = pd.DataFrame(list(live_ratios.items()), columns=["Ratio", "Current Value"])
                     st.table(ratio_df)
                 except Exception as e:
-                    st.error(f"Could not fetch live ratios: {e}")
+                    st.error(f"Could not fetch live ratios. Displaying cached data where available.")
             
             st.markdown("</div>", unsafe_allow_html=True)
 
@@ -423,18 +462,17 @@ if not df.empty:
     left_col, right_col = st.columns([1, 2])
 
     with left_col:
-        # --- BOX 1: COMPARATIVE & TREND (SUMMARY) ---
         st.markdown("""<div class="card"><div class="card-header">Trend Summary</div>""", unsafe_allow_html=True)
-        trend_vals = analysis_vals["trend"].loc[0].values[1:] 
-        trend_years = [str(y) for y in range(2016, 2026)]
-        fig_rev = px.area(x=trend_years, y=trend_vals, title="10Y Revenue Trend Index")
-        fig_rev.update_traces(line_color='#cc0000', fill='tozeroy')
-        fig_rev.update_layout(height=150, margin=dict(l=0,r=0,t=30,b=0), paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', xaxis=dict(showgrid=False, tickfont=dict(color='#888')), yaxis=dict(showgrid=False, visible=False), font=dict(color='#ccc'))
-        st.plotly_chart(fig_rev, use_container_width=True, config={'displayModeBar': False})
+        if "trend" in analysis_vals and analysis_vals["trend"] is not None:
+            trend_vals = analysis_vals["trend"].loc[0].values[1:] 
+            trend_years = [str(y) for y in range(2016, 2026)]
+            fig_rev = px.area(x=trend_years, y=trend_vals, title="10Y Revenue Trend Index")
+            fig_rev.update_traces(line_color='#cc0000', fill='tozeroy')
+            fig_rev.update_layout(height=150, margin=dict(l=0,r=0,t=30,b=0), paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', xaxis=dict(showgrid=False, tickfont=dict(color='#888')), yaxis=dict(showgrid=False, visible=False), font=dict(color='#ccc'))
+            st.plotly_chart(fig_rev, use_container_width=True, config={'displayModeBar': False})
         st.markdown(f"<div style='font-size:13px; color:#ddd; margin-top:10px;'><b>Trend:</b> {static_vals.get('trend_txt')}</div>", unsafe_allow_html=True)
         st.markdown("</div>", unsafe_allow_html=True)
 
-        # --- BOX 2: METRICS (UNCHANGED) ---
         st.markdown("""<div class="card"><div class="card-header">Financial Metrics (Live)</div>""", unsafe_allow_html=True)
         st.markdown(f"""
         <div class="metric-row">
@@ -449,7 +487,6 @@ if not df.empty:
         st.markdown("</div>", unsafe_allow_html=True)
 
     with right_col:
-        # --- BOX 3: AI PREDICTION ---
         st.markdown("""<div class="card"><div class="card-header">AI Predictive Modeling</div>""", unsafe_allow_html=True)
         direction = "UP" if ((pred_price - live_price)/live_price) > 0 else "DOWN"
         p_arrow = "▲" if ((pred_price - live_price)/live_price) > 0 else "▼"
@@ -464,26 +501,20 @@ if not df.empty:
         st.plotly_chart(fig_hm, use_container_width=True)
         st.markdown("</div>", unsafe_allow_html=True)
 
-        # --- BOX 3.5: AI RECOMMENDATION (NEW) ---
         st.markdown("""<div class="card"><div class="card-header">AI Recommendation</div>""", unsafe_allow_html=True)
-        
-        # Calculate percentage difference
         diff_pct = ((pred_price - live_price) / live_price) * 100
-        
-        # Determine Signal
         if diff_pct > 2.0:
             signal = "BUY"
-            sig_color = "#00ff00" # Green
+            sig_color = "#00ff00"
             desc = f"Strong upside potential of {diff_pct:.2f}% projected."
         elif diff_pct < -2.0:
             signal = "SELL"
-            sig_color = "#ff3333" # Red
+            sig_color = "#ff3333"
             desc = f"Downside risk of {abs(diff_pct):.2f}% projected."
         else:
             signal = "HOLD"
-            sig_color = "#ffcc00" # Yellow
+            sig_color = "#ffcc00"
             desc = f"Price stable. Projected change ({diff_pct:.2f}%) is within noise."
-            
         st.markdown(f"""
         <div style="text-align: center; padding: 10px;">
             <div style="font-size: 36px; font-weight: 800; color: {sig_color}; letter-spacing: 2px;">{signal}</div>
@@ -492,58 +523,59 @@ if not df.empty:
         """, unsafe_allow_html=True)
         st.markdown("</div>", unsafe_allow_html=True)
 
-        # --- BOX 4: CHART ---
         st.markdown("""<div class="card"><div class="card-header">Live Market Chart</div>""", unsafe_allow_html=True)
-        chart_df = df.tail(100)
-        fig = go.Figure(data=[go.Candlestick(x=chart_df['Date'], open=chart_df['Open'], high=chart_df['High'], low=chart_df['Low'], close=chart_df['Close'], increasing_line_color='#00ff00', decreasing_line_color='#ff3333')])
+        # Use simple line chart if only dummy data
+        if 'Open' in df.columns:
+            fig = go.Figure(data=[go.Candlestick(x=df['Date'], open=df['Open'], high=df['High'], low=df['Low'], close=df['Close'], increasing_line_color='#00ff00', decreasing_line_color='#ff3333')])
+        else:
+            fig = px.line(df, x='Date', y='Close', title="Price History")
+        
         fig.update_layout(height=350, margin=dict(l=10, r=10, t=10, b=10), paper_bgcolor='#1c1f26', plot_bgcolor='#1c1f26', font=dict(color="#eee"), xaxis_rangeslider_visible=False, xaxis=dict(showgrid=True, gridcolor='#333'), yaxis=dict(showgrid=True, gridcolor='#333'))
         st.plotly_chart(fig, use_container_width=True)
         st.markdown("</div>", unsafe_allow_html=True)
 
-# --- 7. TICKER ---
-@st.cache_data(ttl=300) 
-def fetch_selected_ticker_content(symbol, name):
-    try:
-        stock = yf.Ticker(symbol)
-        
-        # 1. Price Data
-        hist = stock.history(period="5d")
-        if not hist.empty:
-            curr = hist['Close'].iloc[-1]
-            prev = hist['Close'].iloc[-2] if len(hist) > 1 else hist['Open'].iloc[-1]
-            chg = ((curr - prev) / prev) * 100
-            arrow = "▲" if chg >= 0 else "▼"
-            col = "#00ff00" if chg >= 0 else "#ff3333"
-            price_str = f"🔴 {name} LIVE: <span style='color:{col}'>₹{curr:,.2f} ({arrow} {chg:.2f}%)</span>"
-        else:
-            price_str = f"🔴 {name}: PRICE N/A"
-            
-        # 2. News Data - Robust Fetching
-        news_str = ""
+    # --- 7. TICKER ---
+    @st.cache_data(ttl=300) 
+    def fetch_selected_ticker_content(symbol, name):
         try:
-            news_list = stock.news
-            if news_list:
-                headlines = []
-                for n in news_list[:5]: # Get top 5
-                    # Try multiple keys as yfinance schema can change
-                    title = n.get('title') or n.get('headline')
-                    if title: headlines.append(title)
-                
-                if headlines:
-                    news_str = "   &nbsp;&nbsp;&nbsp;  📰  NEWS: " + "  •  ".join(headlines)
-        except Exception:
-            pass 
-        
-        if not news_str:
-            # Fallback if API returns empty but valid response
-            news_str = "   &nbsp;&nbsp;&nbsp;  📰  NEWS: Market data available. Check local news sources for latest updates."
+            stock = yf.Ticker(symbol)
+            hist = stock.history(period="5d")
+            price_str = ""
+            if not hist.empty:
+                curr = hist['Close'].iloc[-1]
+                prev = hist['Close'].iloc[-2] if len(hist) > 1 else hist['Open'].iloc[-1]
+                chg = ((curr - prev) / prev) * 100
+                arrow = "▲" if chg >= 0 else "▼"
+                col = "#00ff00" if chg >= 0 else "#ff3333"
+                price_str = f"🔴 {name} LIVE: <span style='color:{col}'>₹{curr:,.2f} ({arrow} {chg:.2f}%)</span>"
+            else:
+                price_str = f"🔴 {name}: PRICE N/A"
+            
+            news_str = ""
+            try:
+                news_list = stock.news
+                if news_list:
+                    headlines = []
+                    for n in news_list[:5]:
+                        title = n.get('title') or n.get('headline')
+                        if title: headlines.append(title)
+                    if headlines:
+                        news_str = "   &nbsp;&nbsp;&nbsp;  📰  NEWS: " + "  •  ".join(headlines)
+            except Exception:
+                pass 
+            
+            if not news_str:
+                news_str = "   &nbsp;&nbsp;&nbsp;  📰  NEWS: Check local news sources."
 
-        return f"{price_str} {news_str}"
-        
-    except Exception as e:
-        return f"🔴 {name}: Data Unavailable ({str(e)})"
+            return f"{price_str} {news_str}"
+        except Exception as e:
+            return f"🔴 {name}: Data Unavailable"
 
-tape_content = fetch_selected_ticker_content(selected_ticker, selected_label)
-full_tape = (tape_content + "   &nbsp;&nbsp;&nbsp;   ") * 5 
-st.markdown(f"""<div class="ticker-wrap"><div class="ticker-content">{full_tape}</div></div>""", unsafe_allow_html=True)
-st.markdown("<br><br>", unsafe_allow_html=True)
+    tape_content = fetch_selected_ticker_content(selected_ticker, selected_label)
+    full_tape = (tape_content + "   &nbsp;&nbsp;&nbsp;   ") * 5 
+    st.markdown(f"""<div class="ticker-wrap"><div class="ticker-content">{full_tape}</div></div>""", unsafe_allow_html=True)
+    st.markdown("<br><br>", unsafe_allow_html=True)
+
+else:
+    # Error state if no data found
+    st.error(f"Unable to fetch data for {selected_label} ({selected_ticker}). The market API might be temporarily down. Please try again later.")
