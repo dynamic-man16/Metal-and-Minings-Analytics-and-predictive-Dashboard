@@ -15,10 +15,10 @@ import pytz
 
 # --- 1. CONFIGURATION ---
 st.set_page_config(
-    page_title="Retail Sector Analytics",
+    page_title="Metals & Mining Analytics",
     layout="wide",
     initial_sidebar_state="expanded",
-    page_icon="📈"
+    page_icon="⛏️"
 )
 
 # --- 2. CSS STYLING (Red/Black Theme) ---
@@ -236,30 +236,16 @@ ANALYSIS_DATA = {
 def fetch_live_data(ticker):
     try:
         stock = yf.Ticker(ticker)
-        # Try fetching 5 years data
         hist = stock.history(period="5y", interval="1d")
-        
-        # Fallback if 5y is empty (e.g. recent IPO or data issue)
-        if hist.empty:
-            hist = stock.history(period="max", interval="1d")
-            
-        # If still empty, return empty structure (will be caught by if not df.empty check)
-        if hist.empty:
-            return pd.DataFrame(), 0.0, {}
-
+        if hist.empty: hist = stock.history(period="max", interval="1d")
         try:
-            # Try fetching real-time intraday data
             todays_data = stock.history(period="1d", interval="1m")
-            if not todays_data.empty:
-                current_price = todays_data['Close'].iloc[-1]
-            else:
-                current_price = hist['Close'].iloc[-1]
+            current_price = todays_data['Close'].iloc[-1] if not todays_data.empty else hist['Close'].iloc[-1]
         except:
             current_price = hist['Close'].iloc[-1]
-            
         hist.reset_index(inplace=True)
         return hist, current_price, stock.info
-    except Exception as e:
+    except:
         return pd.DataFrame(), 0.0, {}
 
 # --- 5. ML ENGINE ---
@@ -297,6 +283,7 @@ def run_analytics(df, days_forecast):
     return future_price, metrics
 
 # --- 6. APP LAYOUT ---
+st.sidebar.markdown("<h3 style='color: #cc0000;'>METALS & MINING PREDICTOR</h3>", unsafe_allow_html=True)
 category = st.sidebar.radio("Category", ["Large Cap", "Mid Cap", "Small Cap"])
 if category == "Large Cap": comp_map = {"TATASTEEL.NS": "Tata Steel", "SAIL.NS": "SAIL"}
 elif category == "Mid Cap": comp_map = {"HINDALCO.NS": "Hindalco", "NMDC.NS": "NMDC"}
@@ -318,7 +305,7 @@ if not df.empty:
     change = live_price - prev_close
     theme_color = "#00ff00" if change >= 0 else "#ff3333"
 
-    st.markdown(f"## 📊 RETAIL SECTOR ANALYTICS: <span style='color:{theme_color}'>{selected_label.upper()}</span>", unsafe_allow_html=True)
+    st.markdown(f"## 📊 METALS & MINING ANALYTICS: <span style='color:{theme_color}'>{selected_label.upper()}</span>", unsafe_allow_html=True)
 
     # --- ANALYSIS TOGGLE BUTTON ---
     if "show_analysis" not in st.session_state: st.session_state.show_analysis = False
