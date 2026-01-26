@@ -15,7 +15,7 @@ import pytz
 
 # --- 1. CONFIGURATION ---
 st.set_page_config(
-    page_title="Metal and minings Sector Analytics",
+    page_title="Retail Sector Analytics",
     layout="wide",
     initial_sidebar_state="expanded",
     page_icon="📈"
@@ -236,16 +236,30 @@ ANALYSIS_DATA = {
 def fetch_live_data(ticker):
     try:
         stock = yf.Ticker(ticker)
+        # Try fetching 5 years data
         hist = stock.history(period="5y", interval="1d")
-        if hist.empty: hist = stock.history(period="max", interval="1d")
+        
+        # Fallback if 5y is empty (e.g. recent IPO or data issue)
+        if hist.empty:
+            hist = stock.history(period="max", interval="1d")
+            
+        # If still empty, return empty structure (will be caught by if not df.empty check)
+        if hist.empty:
+            return pd.DataFrame(), 0.0, {}
+
         try:
+            # Try fetching real-time intraday data
             todays_data = stock.history(period="1d", interval="1m")
-            current_price = todays_data['Close'].iloc[-1] if not todays_data.empty else hist['Close'].iloc[-1]
+            if not todays_data.empty:
+                current_price = todays_data['Close'].iloc[-1]
+            else:
+                current_price = hist['Close'].iloc[-1]
         except:
             current_price = hist['Close'].iloc[-1]
+            
         hist.reset_index(inplace=True)
         return hist, current_price, stock.info
-    except:
+    except Exception as e:
         return pd.DataFrame(), 0.0, {}
 
 # --- 5. ML ENGINE ---
@@ -291,17 +305,20 @@ selected_ticker = st.sidebar.selectbox("Select Company", list(comp_map.keys()), 
 selected_label = comp_map[selected_ticker]
 days = st.sidebar.slider("Forecast Days", 1, 30, 7)
 
-df, live_price, info = fetch_live_data(selected_ticker)
+# Load Data
+with st.spinner('Fetching real-time market data...'):
+    df, live_price, info = fetch_live_data(selected_ticker)
 static_vals = STATIC_DATA.get(selected_ticker, {})
 analysis_vals = ANALYSIS_DATA.get(selected_ticker, {})
 
+# --- MAIN CONTENT OR ERROR MESSAGE ---
 if not df.empty:
     pred_price, metrics = run_analytics(df, days)
     prev_close = df['Close'].iloc[-2]
     change = live_price - prev_close
     theme_color = "#00ff00" if change >= 0 else "#ff3333"
 
-    st.markdown(f"## 📊 Metal and Minings SECTOR ANALYTICS: <span style='color:{theme_color}'>{selected_label.upper()}</span>", unsafe_allow_html=True)
+    st.markdown(f"## 📊 RETAIL SECTOR ANALYTICS: <span style='color:{theme_color}'>{selected_label.upper()}</span>", unsafe_allow_html=True)
 
     # --- ANALYSIS TOGGLE BUTTON ---
     if "show_analysis" not in st.session_state: st.session_state.show_analysis = False
@@ -464,26 +481,21 @@ if not df.empty:
         st.plotly_chart(fig_hm, use_container_width=True)
         st.markdown("</div>", unsafe_allow_html=True)
 
-        # --- BOX 3.5: AI RECOMMENDATION (NEW) ---
+        # --- BOX 3.5: AI RECOMMENDATION ---
         st.markdown("""<div class="card"><div class="card-header">AI Recommendation</div>""", unsafe_allow_html=True)
-        
-        # Calculate percentage difference
         diff_pct = ((pred_price - live_price) / live_price) * 100
-        
-        # Determine Signal
         if diff_pct > 2.0:
             signal = "BUY"
-            sig_color = "#00ff00" # Green
+            sig_color = "#00ff00"
             desc = f"Strong upside potential of {diff_pct:.2f}% projected."
         elif diff_pct < -2.0:
             signal = "SELL"
-            sig_color = "#ff3333" # Red
+            sig_color = "#ff3333"
             desc = f"Downside risk of {abs(diff_pct):.2f}% projected."
         else:
             signal = "HOLD"
-            sig_color = "#ffcc00" # Yellow
+            sig_color = "#ffcc00"
             desc = f"Price stable. Projected change ({diff_pct:.2f}%) is within noise."
-            
         st.markdown(f"""
         <div style="text-align: center; padding: 10px;">
             <div style="font-size: 36px; font-weight: 800; color: {sig_color}; letter-spacing: 2px;">{signal}</div>
@@ -500,50 +512,47 @@ if not df.empty:
         st.plotly_chart(fig, use_container_width=True)
         st.markdown("</div>", unsafe_allow_html=True)
 
-# --- 7. TICKER ---
-@st.cache_data(ttl=300) 
-def fetch_selected_ticker_content(symbol, name):
-    try:
-        stock = yf.Ticker(symbol)
-        
-        # 1. Price Data
-        hist = stock.history(period="5d")
-        if not hist.empty:
-            curr = hist['Close'].iloc[-1]
-            prev = hist['Close'].iloc[-2] if len(hist) > 1 else hist['Open'].iloc[-1]
-            chg = ((curr - prev) / prev) * 100
-            arrow = "▲" if chg >= 0 else "▼"
-            col = "#00ff00" if chg >= 0 else "#ff3333"
-            price_str = f"🔴 {name} LIVE: <span style='color:{col}'>₹{curr:,.2f} ({arrow} {chg:.2f}%)</span>"
-        else:
-            price_str = f"🔴 {name}: PRICE N/A"
-            
-        # 2. News Data - Robust Fetching
-        news_str = ""
+    # --- 7. TICKER ---
+    @st.cache_data(ttl=300) 
+    def fetch_selected_ticker_content(symbol, name):
         try:
-            news_list = stock.news
-            if news_list:
-                headlines = []
-                for n in news_list[:5]: # Get top 5
-                    # Try multiple keys as yfinance schema can change
-                    title = n.get('title') or n.get('headline')
-                    if title: headlines.append(title)
-                
-                if headlines:
-                    news_str = "   &nbsp;&nbsp;&nbsp;  📰  NEWS: " + "  •  ".join(headlines)
-        except Exception:
-            pass 
-        
-        if not news_str:
-            # Fallback if API returns empty but valid response
-            news_str = "   &nbsp;&nbsp;&nbsp;  📰  NEWS: Market data available. Check local news sources for latest updates."
+            stock = yf.Ticker(symbol)
+            hist = stock.history(period="5d")
+            if not hist.empty:
+                curr = hist['Close'].iloc[-1]
+                prev = hist['Close'].iloc[-2] if len(hist) > 1 else hist['Open'].iloc[-1]
+                chg = ((curr - prev) / prev) * 100
+                arrow = "▲" if chg >= 0 else "▼"
+                col = "#00ff00" if chg >= 0 else "#ff3333"
+                price_str = f"🔴 {name} LIVE: <span style='color:{col}'>₹{curr:,.2f} ({arrow} {chg:.2f}%)</span>"
+            else:
+                price_str = f"🔴 {name}: PRICE N/A"
+            
+            news_str = ""
+            try:
+                news_list = stock.news
+                if news_list:
+                    headlines = []
+                    for n in news_list[:5]:
+                        title = n.get('title') or n.get('headline')
+                        if title: headlines.append(title)
+                    if headlines:
+                        news_str = "   &nbsp;&nbsp;&nbsp;  📰  NEWS: " + "  •  ".join(headlines)
+            except Exception:
+                pass 
+            
+            if not news_str:
+                news_str = "   &nbsp;&nbsp;&nbsp;  📰  NEWS: Market data available. Check local news sources for latest updates."
 
-        return f"{price_str} {news_str}"
-        
-    except Exception as e:
-        return f"🔴 {name}: Data Unavailable ({str(e)})"
+            return f"{price_str} {news_str}"
+        except Exception as e:
+            return f"🔴 {name}: Data Unavailable ({str(e)})"
 
-tape_content = fetch_selected_ticker_content(selected_ticker, selected_label)
-full_tape = (tape_content + "   &nbsp;&nbsp;&nbsp;   ") * 5 
-st.markdown(f"""<div class="ticker-wrap"><div class="ticker-content">{full_tape}</div></div>""", unsafe_allow_html=True)
-st.markdown("<br><br>", unsafe_allow_html=True)
+    tape_content = fetch_selected_ticker_content(selected_ticker, selected_label)
+    full_tape = (tape_content + "   &nbsp;&nbsp;&nbsp;   ") * 5 
+    st.markdown(f"""<div class="ticker-wrap"><div class="ticker-content">{full_tape}</div></div>""", unsafe_allow_html=True)
+    st.markdown("<br><br>", unsafe_allow_html=True)
+
+else:
+    # Error state if no data found
+    st.error(f"Unable to fetch data for {selected_label} ({selected_ticker}). The market API might be temporarily down or limited. Please try again later.")
