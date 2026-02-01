@@ -11,110 +11,25 @@ from sklearn.pipeline import make_pipeline
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import mean_squared_error
 from datetime import datetime, timedelta
-import pytz
+import requests
 
-# --- 1. CONFIGURATION ---
-st.set_page_config(
-    page_title="Metals & Mining Analytics",
-    layout="wide",
-    initial_sidebar_state="expanded",
-    page_icon="⛏️"
-)
+NEWS_API_KEY = "d3d096e3894b496b8302a4e555c1f105"
 
-# --- 2. CSS STYLING (Red/Black Theme) ---
-st.markdown("""
-    <style>
-    /* Main Background */
-    .stApp { background-color: #050505; }
-    
-    @import url('https://fonts.googleapis.com/css2?family=Roboto+Condensed:wght@300;400;700&display=swap');
-    html, body, [class*="css"] { font-family: 'Roboto Condensed', sans-serif; }
+COMPANY_NAMES = {
+    "TATASTEEL.NS": "Tata Steel",
+    "SAIL.NS": "Steel Authority of India",
+    "HINDALCO.NS": "Hindalco Industries",
+    "NMDC.NS": "NMDC Limited",
+    "MOIL.NS": "MOIL Limited",
+    "JINDALSAW.NS": "Jindal SAW"
+}
 
-    /* Grid Layout */
-    .dashboard-container {
-        display: grid;
-        grid-template-columns: 1fr 2fr;
-        gap: 20px;
-        padding: 10px;
-    }
-    
-    /* Card Styling */
-    .card {
-        background-color: #111; 
-        border: 1px solid #333;
-        border-left: 3px solid #cc0000; 
-        border-radius: 4px; 
-        padding: 20px;
-        margin-bottom: 20px;
-        box-shadow: 0 4px 6px rgba(0,0,0,0.5);
-    }
-    .card-header {
-        font-size: 14px;
-        font-weight: 700;
-        text-transform: uppercase;
-        color: #cc0000; 
-        margin-bottom: 15px;
-        border-bottom: 1px solid #333;
-        padding-bottom: 5px;
-        letter-spacing: 1px;
-    }
-    
-    /* Metric Boxes */
-    .metric-row { display: flex; justify-content: space-between; margin-bottom: 10px; }
-    .metric-box { text-align: center; }
-    .metric-val { font-size: 22px; font-weight: 700; color: #eee; }
-    .metric-lbl { font-size: 12px; color: #888; text-transform: uppercase; letter-spacing: 1px; }
-    
-    /* Ticker */
-    .ticker-wrap {
-        position: fixed; bottom: 0; left: 0; width: 100%;
-        height: 45px; background-color: #000; 
-        border-top: 2px solid #cc0000; 
-        z-index: 999999;
-        overflow: hidden; white-space: nowrap;
-        display: flex; align-items: center;
-    }
-    .ticker-content {
-        display: inline-block;
-        font-family: 'Roboto Condensed', monospace;
-        font-size: 16px; color: #f0f0f0; font-weight: 400;
-        white-space: nowrap;
-        padding-left: 100%;
-        animation: ticker-scroll 45s linear infinite;
-    }
-    @keyframes ticker-scroll { 0% { transform: translate3d(0, 0, 0); } 100% { transform: translate3d(-100%, 0, 0); } }
-
-    #MainMenu {visibility: hidden;}
-    footer {visibility: hidden;}
-    header {visibility: hidden;}
-    
-    section[data-testid="stSidebar"] {
-        background-color: #0a0a0a;
-        border-right: 1px solid #333;
-    }
-    
-    /* Button Styling */
-    .stButton>button {
-        width: 100%;
-        background-color: #1a1a1a;
-        color: #cc0000;
-        border: 1px solid #cc0000;
-        font-weight: bold;
-    }
-    .stButton>button:hover {
-        background-color: #cc0000;
-        color: white;
-        border-color: #ff0000;
-    }
-    </style>
-    """, unsafe_allow_html=True)
-
-# --- 3. HARDCODED STATIC DATA (Existing) ---
+# Static Data
 STATIC_DATA = {
     "TATASTEEL.NS": {
         "trend_txt": "Revenue Consolidation: -5.9% dip in 2025 vs 2024.",
         "comp_txt": "EBITDA Margin: Outperforming Sector Average (14% vs 11%).",
-        "last_price": 145.00 # Fallback Price
+        "last_price": 145.00
     },
     "SAIL.NS": {
         "trend_txt": "Stable Revenue > ₹1L Cr. Slight dip in 2025 (-2.7%).",
@@ -143,7 +58,7 @@ STATIC_DATA = {
     }
 }
 
-# --- 4. EXTENDED ANALYSIS DATA (P&L + BALANCE SHEET PARAMETERS) ---
+# Analysis Data - 10 Year Trends
 ANALYSIS_DATA = {
     "TATASTEEL.NS": {
         "trend": pd.DataFrame({
@@ -212,7 +127,6 @@ ANALYSIS_DATA = {
             "2017": [156.0, 121.5, 1330.2, 81.3, 79.2], 
             "2018": [208.6, 138.4, 2597.8, 77.3, 153.3], 
             "2019": [227.0, 147.9, 2922.3, 85.9, 153.3], 
-            "2019": [227.0, 147.9, 2922.3, 85.9, 153.3], 
             "2020": [163.6, 142.5, 880.6, 76.8, 141.2],
             "2021": [185.5, 160.5, 1036.7, 78.6, 141.2], 
             "2022": [226.3, 162.0, 2417.7, 58.9, 121.1], 
@@ -238,30 +152,237 @@ ANALYSIS_DATA = {
     }
 }
 
+st.set_page_config(
+    page_title="Metals & Mining Analytics",
+    layout="wide",
+    initial_sidebar_state="collapsed",
+    page_icon="⛏️"
+)
+
+# IMPROVED AESTHETIC CSS - TradingView Style
+st.markdown("""
+<style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+    
+    * { font-family: 'Inter', -apple-system, sans-serif; }
+    .stApp { background-color: #0b0b0b; }
+    #MainMenu, footer, header { visibility: hidden; }
+    section[data-testid="stSidebar"] { display: none; }
+    
+    /* Card System */
+    .card {
+        background: linear-gradient(145deg, #131313, #0f0f0f);
+        border: 1px solid #1a1a1a;
+        border-radius: 8px;
+        padding: 20px;
+        margin-bottom: 20px;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+    }
+    
+    .card-header {
+        font-size: 11px;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.8px;
+        color: #666;
+        margin-bottom: 16px;
+        padding-bottom: 10px;
+        border-bottom: 1px solid #1a1a1a;
+    }
+    
+    /* Control Bar */
+    .control-bar {
+        background: linear-gradient(135deg, #131313, #0f0f0f);
+        border: 1px solid #1a1a1a;
+        border-radius: 8px;
+        padding: 20px 24px;
+        margin-bottom: 24px;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+    }
+    
+    /* Metrics */
+    .metric-row {
+        display: flex;
+        justify-content: space-around;
+        margin: 16px 0;
+    }
+    
+    .metric-box {
+        text-align: center;
+        padding: 12px;
+        background-color: #0d0d0d;
+        border-radius: 6px;
+        border: 1px solid #1a1a1a;
+        flex: 1;
+        margin: 0 6px;
+    }
+    
+    .metric-val {
+        font-size: 20px;
+        font-weight: 700;
+        color: #fff;
+        margin-bottom: 4px;
+    }
+    
+    .metric-lbl {
+        font-size: 10px;
+        font-weight: 500;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+        color: #666;
+    }
+    
+    /* Ticker Tape */
+    .ticker-wrap {
+        position: fixed;
+        bottom: 0;
+        left: 0;
+        width: 100%;
+        height: 36px;
+        background-color: #080808;
+        border-top: 1px solid #1a1a1a;
+        z-index: 999999;
+        overflow: hidden;
+        display: flex;
+        align-items: center;
+    }
+    
+    .ticker-content {
+        display: inline-block;
+        font-size: 13px;
+        font-weight: 500;
+        color: #999;
+        white-space: nowrap;
+        padding-left: 100%;
+        animation: ticker-scroll 60s linear infinite;
+    }
+    
+    @keyframes ticker-scroll {
+        0% { transform: translateX(0); }
+        100% { transform: translateX(-50%); }
+    }
+    
+    /* Streamlit Widget Styling */
+    .stSelectbox > div > div {
+        background-color: #0d0d0d !important;
+        border: 1px solid #262626 !important;
+        color: #fff !important;
+    }
+    
+    .stRadio > div { background-color: transparent !important; }
+    
+    .stRadio label {
+        color: #999 !important;
+        font-size: 13px !important;
+        font-weight: 500 !important;
+    }
+    
+    .stSlider > div > div { background-color: #0d0d0d !important; }
+    .stSlider span { color: #fff !important; }
+    
+    .stButton > button {
+        background-color: #1a1a1a;
+        color: #26a69a;
+        border: 1px solid #262626;
+        border-radius: 6px;
+        padding: 10px 20px;
+        font-weight: 600;
+        font-size: 13px;
+        transition: all 0.2s;
+    }
+    
+    .stButton > button:hover {
+        background-color: #262626;
+        border-color: #26a69a;
+    }
+    
+    /* Tab Styling */
+    .stTabs [data-baseweb="tab-list"] {
+        gap: 8px;
+        background-color: #0d0d0d;
+        padding: 8px;
+        border-radius: 8px;
+    }
+    
+    .stTabs [data-baseweb="tab"] {
+        background-color: #131313;
+        border: 1px solid #1a1a1a;
+        color: #999;
+        border-radius: 6px;
+        padding: 8px 16px;
+    }
+    
+    .stTabs [aria-selected="true"] {
+        background-color: #1a1a1a;
+        color: #26a69a;
+        border-color: #26a69a;
+    }
+</style>
+""", unsafe_allow_html=True)
+
+# Data Fetching Functions
+@st.cache_data(ttl=300)
+def fetch_company_news(symbol, company_name):
+    """Fetch company-specific news from NewsAPI"""
+    try:
+        url = "https://newsapi.org/v2/everything"
+        params = {
+            "q": f'"{company_name}" OR {symbol.replace(".NS", "")}',
+            "language": "en",
+            "sortBy": "publishedAt",
+            "pageSize": 20,
+            "apiKey": NEWS_API_KEY
+        }
+        
+        response = requests.get(url, params=params, timeout=10)
+        data = response.json()
+        
+        if data.get("status") != "ok":
+            return []
+        
+        headlines = []
+        for article in data.get("articles", []):
+            title = article.get("title", "")
+            description = article.get("description", "") or ""
+            combined = f"{title} {description}".lower()
+            
+            company_lower = company_name.lower()
+            symbol_clean = symbol.replace(".NS", "").lower()
+            
+            if company_lower in combined or symbol_clean in combined:
+                headlines.append(title)
+                
+            if len(headlines) >= 3:
+                break
+        
+        return headlines if headlines else ["No recent news"]
+        
+    except Exception:
+        return ["News unavailable"]
+
+
 @st.cache_data(ttl=300)
 def fetch_live_data(ticker):
+    """Fetch live market data from yfinance"""
     try:
         stock = yf.Ticker(ticker)
-        # Try fetching 5 years data
         hist = stock.history(period="5y", interval="1d")
         
-        # Fallback if 5y is empty (e.g. recent IPO or data issue)
         if hist.empty:
             hist = stock.history(period="max", interval="1d")
             
-        # If still empty, create a dummy dataframe based on static data
         if hist.empty:
-            # Create dummy dates and close prices for visualization
             dates = pd.date_range(end=datetime.now(), periods=100)
             dummy_price = STATIC_DATA.get(ticker, {}).get("last_price", 100.0)
-            hist = pd.DataFrame({'Open': [dummy_price]*100, 'High': [dummy_price]*100, 
-                                 'Low': [dummy_price]*100, 'Close': [dummy_price]*100, 
-                                 'Volume': [0]*100}, index=dates)
+            hist = pd.DataFrame({
+                'Open': [dummy_price]*100, 'High': [dummy_price]*100, 
+                'Low': [dummy_price]*100, 'Close': [dummy_price]*100, 
+                'Volume': [0]*100
+            }, index=dates)
             current_price = dummy_price
-            return hist, current_price, {} # Empty info dict
+            return hist, current_price, {}
 
         try:
-            # Try fetching real-time intraday data
             todays_data = stock.history(period="1d", interval="1m")
             if not todays_data.empty:
                 current_price = todays_data['Close'].iloc[-1]
@@ -271,23 +392,26 @@ def fetch_live_data(ticker):
             current_price = hist['Close'].iloc[-1]
             
         hist.reset_index(inplace=True)
-        # Handle case where reset_index might fail if index is not named Date
         if 'Date' not in hist.columns and 'Datetime' in hist.columns:
              hist.rename(columns={'Datetime': 'Date'}, inplace=True)
         elif 'Date' not in hist.columns:
              hist['Date'] = hist.index
 
         return hist, current_price, stock.info
+        
     except Exception as e:
-        # Final fallback: Return dummy data to prevent crash
         dates = pd.date_range(end=datetime.now(), periods=100)
         dummy_price = STATIC_DATA.get(ticker, {}).get("last_price", 100.0)
-        hist = pd.DataFrame({'Date': dates, 'Open': [dummy_price]*100, 'High': [dummy_price]*100, 
-                             'Low': [dummy_price]*100, 'Close': [dummy_price]*100, 
-                             'Volume': [0]*100})
+        hist = pd.DataFrame({
+            'Date': dates, 
+            'Open': [dummy_price]*100, 'High': [dummy_price]*100, 
+            'Low': [dummy_price]*100, 'Close': [dummy_price]*100, 
+            'Volume': [0]*100
+        })
         return hist, dummy_price, {}
 
-# --- 5. ML ENGINE ---
+
+# ML Functions
 def calculate_rsi(data, window=14):
     delta = data.diff()
     gain = (delta.where(delta > 0, 0)).rolling(window=window).mean()
@@ -295,29 +419,27 @@ def calculate_rsi(data, window=14):
     rs = gain / loss
     return 100 - (100 / (1 + rs))
 
+
 def run_analytics(df, days_forecast):
-    # Check if df has enough data, if not (e.g. dummy data), return 0 variance
     if len(df) < 20 or df['Close'].std() == 0:
         return df['Close'].iloc[-1], {"NN_RMSE":0,"NN_MAPE":0,"RF_RMSE":0,"RF_MAPE":0}
 
     df = df.copy()
-    # Ensure Date is datetime
     df['Date'] = pd.to_datetime(df['Date'])
     df['Date_Ordinal'] = df['Date'].apply(lambda x: x.toordinal())
-    df['MA_50'] = df['Close'].rolling(window=50).mean().bfill() # bfill for short history
+    df['MA_50'] = df['Close'].rolling(window=50).mean().bfill()
     df['EMA_20'] = df['Close'].ewm(span=20, adjust=False).mean()
-    df['RSI'] = calculate_rsi(df['Close']).fillna(50) # fillna
+    df['RSI'] = calculate_rsi(df['Close']).fillna(50)
     df['Lag_1'] = df['Close'].shift(1).fillna(df['Close'])
     df['Lag_2'] = df['Close'].shift(2).fillna(df['Close'])
     
-    # Drop remaining NaNs if any, but ensure we have data
     df.dropna(inplace=True)
-    if df.empty: return df['Close'].iloc[-1], {"NN_RMSE":0,"NN_MAPE":0,"RF_RMSE":0,"RF_MAPE":0}
+    if df.empty:
+        return df['Close'].iloc[-1], {"NN_RMSE":0,"NN_MAPE":0,"RF_RMSE":0,"RF_MAPE":0}
 
     X = df[['Date_Ordinal', 'MA_50', 'EMA_20', 'RSI', 'Lag_1', 'Lag_2']]
     y = df['Close']
     
-    # Handle small datasets
     if len(X) < 10:
         return y.iloc[-1], {"NN_RMSE":0,"NN_MAPE":0,"RF_RMSE":0,"RF_MAPE":0}
 
@@ -328,58 +450,101 @@ def run_analytics(df, days_forecast):
     
     rf_pred, nn_pred = rf.predict(X_test), nn.predict(X_test)
     metrics = {
-        "NN_RMSE": np.sqrt(mean_squared_error(y_test, nn_pred)), "NN_MAPE": np.mean(np.abs((y_test - nn_pred) / y_test)) * 100,
-        "RF_RMSE": np.sqrt(mean_squared_error(y_test, rf_pred)), "RF_MAPE": np.mean(np.abs((y_test - rf_pred) / y_test)) * 100
+        "NN_RMSE": np.sqrt(mean_squared_error(y_test, nn_pred)), 
+        "NN_MAPE": np.mean(np.abs((y_test - nn_pred) / y_test)) * 100,
+        "RF_RMSE": np.sqrt(mean_squared_error(y_test, rf_pred)), 
+        "RF_MAPE": np.mean(np.abs((y_test - rf_pred) / y_test)) * 100
     }
+    
     last_row = df.iloc[-1]
     next_ord = df['Date'].iloc[-1].toordinal() + days_forecast
-    inp = pd.DataFrame([{'Date_Ordinal': next_ord, 'MA_50': last_row['MA_50'], 'EMA_20': last_row['EMA_20'], 'RSI': last_row['RSI'], 'Lag_1': last_row['Close'], 'Lag_2': last_row['Lag_1']}])
+    inp = pd.DataFrame([{
+        'Date_Ordinal': next_ord, 
+        'MA_50': last_row['MA_50'], 
+        'EMA_20': last_row['EMA_20'], 
+        'RSI': last_row['RSI'], 
+        'Lag_1': last_row['Close'], 
+        'Lag_2': last_row['Lag_1']
+    }])
+    
     future_price = (rf.predict(inp)[0] + nn.predict(inp)[0]) / 2
     return future_price, metrics
 
-# --- 6. APP LAYOUT ---
-category = st.sidebar.radio("Category", ["Large Cap", "Mid Cap", "Small Cap"])
-if category == "Large Cap": comp_map = {"TATASTEEL.NS": "Tata Steel", "SAIL.NS": "SAIL"}
-elif category == "Mid Cap": comp_map = {"HINDALCO.NS": "Hindalco", "NMDC.NS": "NMDC"}
-else: comp_map = {"MOIL.NS": "MOIL", "JINDALSAW.NS": "Jindal Saw"}
-selected_ticker = st.sidebar.selectbox("Select Company", list(comp_map.keys()), format_func=lambda x: comp_map[x])
+
+# MAIN APP
+st.markdown('<div class="control-bar">', unsafe_allow_html=True)
+
+c1, c2, c3 = st.columns([1.4, 2.8, 1.6])
+
+with c1:
+    category = st.radio("Category", ["Large Cap", "Mid Cap", "Small Cap"], horizontal=True)
+
+if category == "Large Cap":
+    comp_map = {"TATASTEEL.NS": "Tata Steel", "SAIL.NS": "SAIL"}
+elif category == "Mid Cap":
+    comp_map = {"HINDALCO.NS": "Hindalco", "NMDC.NS": "NMDC"}
+else:
+    comp_map = {"MOIL.NS": "MOIL", "JINDALSAW.NS": "Jindal Saw"}
+
+with c2:
+    selected_ticker = st.selectbox("Select Company", list(comp_map.keys()), format_func=lambda x: comp_map[x])
+
+with c3:
+    days = st.slider("Forecast Days", 1, 30, 7)
+
+st.markdown("</div>", unsafe_allow_html=True)
+
 selected_label = comp_map[selected_ticker]
-days = st.sidebar.slider("Forecast Days", 1, 30, 7)
 
 # Load Data
 with st.spinner('Fetching real-time market data...'):
     df, live_price, info = fetch_live_data(selected_ticker)
+    
 static_vals = STATIC_DATA.get(selected_ticker, {})
 analysis_vals = ANALYSIS_DATA.get(selected_ticker, {})
 
-# --- MAIN CONTENT ---
+# Main Content
 if not df.empty:
     pred_price, metrics = run_analytics(df, days)
-    # Handle cases where prev_close might not exist in short/dummy data
     prev_close = df['Close'].iloc[-2] if len(df) > 1 else live_price
     change = live_price - prev_close
-    theme_color = "#00ff00" if change >= 0 else "#ff3333"
+    theme_color = "#26a69a" if change >= 0 else "#ef5350"
+    pct_change = (change / prev_close) * 100
+    arrow = "▲" if change >= 0 else "▼"
 
-    st.markdown(f"## 📊 METALS & MINING ANALYTICS: <span style='color:{theme_color}'>{selected_label.upper()}</span>", unsafe_allow_html=True)
+    st.markdown(f"""
+    <div style="padding: 20px 0; border-bottom: 1px solid #1a1a1a; margin-bottom: 24px;">
+        <div style="font-size: 24px; font-weight: 600; color: #fff; margin-bottom: 8px;">
+            📊 {selected_label.upper()}
+        </div>
+        <div style="display: flex; align-items: baseline; gap: 16px;">
+            <span style="font-size: 32px; font-weight: 700; color: #fff;">₹{live_price:,.2f}</span>
+            <span style="font-size: 18px; font-weight: 600; color: {theme_color}; padding: 4px 12px; background-color: {theme_color}20; border-radius: 4px;">
+                {arrow} {abs(pct_change):.2f}% (₹{abs(change):.2f})
+            </span>
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
 
-    if not info: # If info is empty (fallback mode), warn user
+    if not info:
         st.warning("⚠️ Live market data unavailable. Displaying cached/static data.")
 
-    # --- ANALYSIS TOGGLE BUTTON ---
-    if "show_analysis" not in st.session_state: st.session_state.show_analysis = False
+    # Analysis Toggle
+    if "show_analysis" not in st.session_state:
+        st.session_state.show_analysis = False
     
     def toggle_analysis():
         st.session_state.show_analysis = not st.session_state.show_analysis
 
     st.button("🔍 SHOW COMPARATIVE & TREND ANALYSIS", on_click=toggle_analysis)
 
-    # --- ANALYSIS CONTAINER ---
+    # Analysis Section
     if st.session_state.show_analysis:
         with st.container():
-            st.markdown(f"""<div class="card" style="border-left: 3px solid #00ceff;">
-                            <div class="card-header" style="color: #00ceff;">DETAILED ANALYSIS: {selected_label}</div>""", unsafe_allow_html=True)
+            st.markdown('<div class="card" style="border-left: 3px solid #26a69a;">', unsafe_allow_html=True)
+            st.markdown(f'<div class="card-header" style="color: #26a69a;">DETAILED ANALYSIS: {selected_label}</div>', unsafe_allow_html=True)
             
-            t1, t2, t3 = st.tabs(["📉 TREND ANALYSIS (GRAPHICAL)", "⚖️ COMPARATIVE (YoY GRAPH)", "📊 RATIOS (LIVE)"])
+            t1, t2, t3 = st.tabs(["📉 TREND ANALYSIS", "⚖️ COMPARATIVE (YoY)", "📊 LIVE RATIOS"])
             
             with t1:
                 st.markdown("**10-Year Trend Analysis (Base Year 2016 = 100)**")
@@ -387,10 +552,19 @@ if not df.empty:
                     trend_df = analysis_vals["trend"].set_index("Metric").T.reset_index().rename(columns={"index": "Year"})
                     metrics_to_plot = [c for c in trend_df.columns if c != "Year"]
                     
-                    fig_trend = px.line(trend_df, x="Year", y=metrics_to_plot, 
-                                        markers=True, title="10-Year Trend Index (2016-2025)",
-                                        color_discrete_sequence=["#00ff00", "#ff3333", "#00ceff", "#ffff00", "#ff00ff"])
-                    fig_trend.update_layout(height=400, plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)', font=dict(color="#ddd"))
+                    fig_trend = px.line(
+                        trend_df, x="Year", y=metrics_to_plot, 
+                        markers=True, title="10-Year Trend Index (2016-2025)",
+                        color_discrete_sequence=["#26a69a", "#ef5350", "#42a5f5", "#ffa726", "#ab47bc"]
+                    )
+                    fig_trend.update_layout(
+                        height=400, 
+                        plot_bgcolor='#0d0d0d', 
+                        paper_bgcolor='#0d0d0d', 
+                        font=dict(color="#999"),
+                        xaxis=dict(showgrid=True, gridcolor='#1a1a1a'),
+                        yaxis=dict(showgrid=True, gridcolor='#1a1a1a')
+                    )
                     st.plotly_chart(fig_trend, use_container_width=True)
                 else:
                     st.info("Trend Data Not Available")
@@ -401,6 +575,7 @@ if not df.empty:
                     trend_df = analysis_vals["trend"].set_index("Metric")
                     years = [str(y) for y in range(2017, 2026)]
                     growth_dict = {"Year": years}
+                    
                     for metric in trend_df.index:
                         growth_list = []
                         for y in years:
@@ -414,16 +589,25 @@ if not df.empty:
                     growth_df = pd.DataFrame(growth_dict)
                     main_metrics = [m for m in ["Revenue", "EBIT", "Reserves & Surplus"] if m in growth_df.columns]
                     
-                    fig_growth = px.bar(growth_df, x="Year", y=main_metrics, barmode='group',
-                                        title="YoY Growth Percentage (2017-2025)",
-                                        color_discrete_sequence=["#00ff00", "#00ceff", "#ffff00"])
-                    fig_growth.update_layout(height=400, plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)', font=dict(color="#ddd"))
+                    fig_growth = px.bar(
+                        growth_df, x="Year", y=main_metrics, barmode='group',
+                        title="YoY Growth Percentage (2017-2025)",
+                        color_discrete_sequence=["#26a69a", "#42a5f5", "#ffa726"]
+                    )
+                    fig_growth.update_layout(
+                        height=400, 
+                        plot_bgcolor='#0d0d0d', 
+                        paper_bgcolor='#0d0d0d', 
+                        font=dict(color="#999"),
+                        xaxis=dict(showgrid=True, gridcolor='#1a1a1a'),
+                        yaxis=dict(showgrid=True, gridcolor='#1a1a1a')
+                    )
                     st.plotly_chart(fig_growth, use_container_width=True)
                 else:
                     st.info("Comparative Data Not Available")
 
             with t3:
-                st.markdown("**Key Financial Ratios (Real-Time Live Data)**")
+                st.markdown("**Key Financial Ratios (Real-Time)**")
                 try:
                     live_ratios = {
                         "P/E Ratio": info.get('trailingPE', 0),
@@ -432,150 +616,246 @@ if not df.empty:
                         "Debt/Equity": info.get('debtToEquity', 0),
                         "Current Ratio": info.get('currentRatio', 0)
                     }
+                    
                     st.markdown("##### Performance Gauges")
                     c1, c2, c3 = st.columns(3)
+                    
                     def make_gauge(title, val, min_v, max_v):
                         fig = go.Figure(go.Indicator(
-                            mode = "gauge+number", value = val, title = {'text': title, 'font': {'size': 14}}, 
-                            gauge = {'axis': {'range': [min_v, max_v]}, 'bar': {'color': "#cc0000"}, 'bgcolor': "#333", 'borderwidth': 2, 'bordercolor': "#333"}
+                            mode="gauge+number", 
+                            value=val, 
+                            title={'text': title, 'font': {'size': 14, 'color': '#999'}}, 
+                            gauge={
+                                'axis': {'range': [min_v, max_v]}, 
+                                'bar': {'color': "#26a69a"}, 
+                                'bgcolor': "#1a1a1a", 
+                                'borderwidth': 2, 
+                                'bordercolor': "#1a1a1a"
+                            }
                         ))
-                        fig.update_layout(height=200, margin=dict(l=20,r=20,t=40,b=20), paper_bgcolor='rgba(0,0,0,0)', font=dict(color="#ddd"))
+                        fig.update_layout(
+                            height=200, 
+                            margin=dict(l=20,r=20,t=40,b=20), 
+                            paper_bgcolor='#0d0d0d', 
+                            font=dict(color="#999")
+                        )
                         return fig
                     
                     pe_val = live_ratios.get("P/E Ratio", 0) if isinstance(live_ratios.get("P/E Ratio"), (int, float)) else 0
                     roe_val = (info.get('returnOnEquity', 0) or 0) * 100
                     pm_val = (info.get('profitMargins', 0) or 0) * 100
 
-                    with c1: st.plotly_chart(make_gauge("P/E Ratio", pe_val, 0, 50), use_container_width=True)
-                    with c2: st.plotly_chart(make_gauge("ROE %", roe_val, -20, 40), use_container_width=True)
-                    with c3: st.plotly_chart(make_gauge("Profit Margin %", pm_val, 0, 30), use_container_width=True)
+                    with c1:
+                        st.plotly_chart(make_gauge("P/E Ratio", pe_val, 0, 50), use_container_width=True)
+                    with c2:
+                        st.plotly_chart(make_gauge("ROE %", roe_val, -20, 40), use_container_width=True)
+                    with c3:
+                        st.plotly_chart(make_gauge("Profit Margin %", pm_val, 0, 30), use_container_width=True)
                     
-                    st.markdown("##### Detailed Ratios Table")
-                    ratio_df = pd.DataFrame(list(live_ratios.items()), columns=["Ratio", "Current Value"])
+                    st.markdown("##### Detailed Ratios")
+                    ratio_df = pd.DataFrame(list(live_ratios.items()), columns=["Ratio", "Value"])
                     st.table(ratio_df)
+                    
                 except Exception as e:
-                    st.error(f"Could not fetch live ratios. Displaying cached data where available.")
+                    st.error(f"Could not fetch live ratios. Error: {str(e)}")
             
             st.markdown("</div>", unsafe_allow_html=True)
 
-    # --- MAIN GRID ---
+    # Main Grid
     left_col, right_col = st.columns([1, 2])
 
     with left_col:
-        st.markdown("""<div class="card"><div class="card-header">Trend Summary</div>""", unsafe_allow_html=True)
+        # Trend Summary
+        st.markdown('<div class="card"><div class="card-header">Trend Summary</div>', unsafe_allow_html=True)
         if "trend" in analysis_vals and analysis_vals["trend"] is not None:
             trend_vals = analysis_vals["trend"].loc[0].values[1:] 
             trend_years = [str(y) for y in range(2016, 2026)]
+            
             fig_rev = px.area(x=trend_years, y=trend_vals, title="10Y Revenue Trend Index")
-            fig_rev.update_traces(line_color='#cc0000', fill='tozeroy')
-            fig_rev.update_layout(height=150, margin=dict(l=0,r=0,t=30,b=0), paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', xaxis=dict(showgrid=False, tickfont=dict(color='#888')), yaxis=dict(showgrid=False, visible=False), font=dict(color='#ccc'))
+            fig_rev.update_traces(line_color='#26a69a', fill='tozeroy')
+            fig_rev.update_layout(
+                height=150, 
+                margin=dict(l=0,r=0,t=30,b=0), 
+                paper_bgcolor='#0d0d0d', 
+                plot_bgcolor='#0d0d0d', 
+                xaxis=dict(showgrid=False, tickfont=dict(color='#666')), 
+                yaxis=dict(showgrid=False, visible=False), 
+                font=dict(color='#999')
+            )
             st.plotly_chart(fig_rev, use_container_width=True, config={'displayModeBar': False})
-        st.markdown(f"<div style='font-size:13px; color:#ddd; margin-top:10px;'><b>Trend:</b> {static_vals.get('trend_txt')}</div>", unsafe_allow_html=True)
+        
+        st.markdown(f"<div style='font-size:13px; color:#ccc; margin-top:10px;'><b>Trend:</b> {static_vals.get('trend_txt')}</div>", unsafe_allow_html=True)
         st.markdown("</div>", unsafe_allow_html=True)
 
-        st.markdown("""<div class="card"><div class="card-header">Financial Metrics (Live)</div>""", unsafe_allow_html=True)
+        # Financial Metrics
+        st.markdown('<div class="card"><div class="card-header">Financial Metrics (Live)</div>', unsafe_allow_html=True)
         st.markdown(f"""
         <div class="metric-row">
-            <div class="metric-box"><div class="metric-val">{info.get('trailingPE', 'N/A')}</div><div class="metric-lbl">P/E RATIO</div></div>
-            <div class="metric-box"><div class="metric-val">{info.get('trailingEps', 'N/A')}</div><div class="metric-lbl">EPS (TTM)</div></div>
+            <div class="metric-box">
+                <div class="metric-val">{info.get('trailingPE', 'N/A')}</div>
+                <div class="metric-lbl">P/E Ratio</div>
+            </div>
+            <div class="metric-box">
+                <div class="metric-val">{info.get('trailingEps', 'N/A')}</div>
+                <div class="metric-lbl">EPS (TTM)</div>
+            </div>
         </div>
         <div class="metric-row">
-             <div class="metric-box"><div class="metric-val">{info.get('regularMarketOpen', 'N/A')}</div><div class="metric-lbl">OPEN PRICE</div></div>
-             <div class="metric-box"><div class="metric-val">{f"{info.get('returnOnEquity', 0)*100:.2f}%" if info.get('returnOnEquity') else 'N/A'}</div><div class="metric-lbl">ROE %</div></div>
+            <div class="metric-box">
+                <div class="metric-val">{info.get('regularMarketOpen', 'N/A')}</div>
+                <div class="metric-lbl">Open Price</div>
+            </div>
+            <div class="metric-box">
+                <div class="metric-val">{f"{info.get('returnOnEquity', 0)*100:.2f}%" if info.get('returnOnEquity') else 'N/A'}</div>
+                <div class="metric-lbl">ROE %</div>
+            </div>
         </div>
         """, unsafe_allow_html=True)
         st.markdown("</div>", unsafe_allow_html=True)
 
     with right_col:
-        st.markdown("""<div class="card"><div class="card-header">AI Predictive Modeling</div>""", unsafe_allow_html=True)
+        # AI Forecast
+        st.markdown('<div class="card"><div class="card-header">AI Predictive Modeling</div>', unsafe_allow_html=True)
         direction = "UP" if ((pred_price - live_price)/live_price) > 0 else "DOWN"
         p_arrow = "▲" if ((pred_price - live_price)/live_price) > 0 else "▼"
-        st.markdown(f"""<div style="background: #000; border: 1px solid #333; padding: 15px; margin-bottom: 15px; text-align: center;">
-            <div style="color:#888; font-size:12px;">FORECAST FOR {days} DAYS AHEAD</div>
-            <div style="font-size:32px; color:{theme_color}; font-weight:bold;">{p_arrow} {direction} {abs((pred_price - live_price)/live_price)*100:.2f}%</div>
-            <div style="color:#ccc;">Target Price: <b>₹{pred_price:,.2f}</b></div>
-        </div>""", unsafe_allow_html=True)
+        forecast_pct = abs((pred_price - live_price)/live_price)*100
+        
+        st.markdown(f"""
+        <div style="background: linear-gradient(135deg, #0f0f0f, #131313); border: 1px solid #1a1a1a; padding: 20px; margin-bottom: 15px; text-align: center; border-radius: 8px;">
+            <div style="color:#666; font-size:11px; text-transform: uppercase; letter-spacing: 0.8px;">Forecast for {days} Days Ahead</div>
+            <div style="font-size:36px; color:{theme_color}; font-weight:700; margin: 12px 0;">{p_arrow} {direction} {forecast_pct:.2f}%</div>
+            <div style="color:#999; font-size: 14px;">Target Price: <b style="color:#fff;">₹{pred_price:,.2f}</b></div>
+        </div>
+        """, unsafe_allow_html=True)
+        
+        # Model Performance Heatmap
         hm_z = [[metrics['NN_RMSE'], metrics['NN_MAPE']], [metrics['RF_RMSE'], metrics['RF_MAPE']]]
-        fig_hm = go.Figure(go.Heatmap(z=hm_z, x=['RMSE (₹)', 'MAPE (%)'], y=['Neural Network', 'Random Forest'], colorscale='RdYlGn_r', texttemplate="%{z:.2f}", textfont={"size": 14}))
-        fig_hm.update_layout(height=180, margin=dict(l=0,r=0,t=0,b=0), paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)')
-        st.plotly_chart(fig_hm, use_container_width=True)
+        fig_hm = go.Figure(go.Heatmap(
+            z=hm_z, 
+            x=['RMSE (₹)', 'MAPE (%)'], 
+            y=['Neural Network', 'Random Forest'], 
+            colorscale='RdYlGn_r', 
+            texttemplate="%{z:.2f}", 
+            textfont={"size": 14, "color": "#fff"},
+            showscale=False
+        ))
+        fig_hm.update_layout(
+            height=180, 
+            margin=dict(l=0,r=0,t=0,b=0), 
+            paper_bgcolor='#0d0d0d', 
+            plot_bgcolor='#0d0d0d',
+            xaxis=dict(side='top', tickfont=dict(color='#999')),
+            yaxis=dict(tickfont=dict(color='#999'))
+        )
+        st.plotly_chart(fig_hm, use_container_width=True, config={'displayModeBar': False})
         st.markdown("</div>", unsafe_allow_html=True)
 
-        st.markdown("""<div class="card"><div class="card-header">AI Recommendation</div>""", unsafe_allow_html=True)
+        # AI Recommendation
+        st.markdown('<div class="card"><div class="card-header">AI Recommendation</div>', unsafe_allow_html=True)
         diff_pct = ((pred_price - live_price) / live_price) * 100
+        
         if diff_pct > 2.0:
             signal = "BUY"
-            sig_color = "#00ff00"
+            sig_color = "#26a69a"
             desc = f"Strong upside potential of {diff_pct:.2f}% projected."
         elif diff_pct < -2.0:
             signal = "SELL"
-            sig_color = "#ff3333"
+            sig_color = "#ef5350"
             desc = f"Downside risk of {abs(diff_pct):.2f}% projected."
         else:
             signal = "HOLD"
-            sig_color = "#ffcc00"
+            sig_color = "#ffa726"
             desc = f"Price stable. Projected change ({diff_pct:.2f}%) is within noise."
+        
         st.markdown(f"""
-        <div style="text-align: center; padding: 10px;">
-            <div style="font-size: 36px; font-weight: 800; color: {sig_color}; letter-spacing: 2px;">{signal}</div>
-            <div style="color: #ccc; font-size: 14px; margin-top: 5px;">{desc}</div>
+        <div style="text-align: center; padding: 24px 0;">
+            <div style="display: inline-block; padding: 12px 32px; font-size: 24px; font-weight: 700; letter-spacing: 1px; 
+                        color: {sig_color}; background-color: {sig_color}20; border: 2px solid {sig_color}; border-radius: 8px;">
+                {signal}
+            </div>
+            <div style="color: #999; font-size: 13px; margin-top: 16px;">{desc}</div>
         </div>
         """, unsafe_allow_html=True)
         st.markdown("</div>", unsafe_allow_html=True)
 
-        st.markdown("""<div class="card"><div class="card-header">Live Market Chart</div>""", unsafe_allow_html=True)
-        # Use simple line chart if only dummy data
-        if 'Open' in df.columns:
-            fig = go.Figure(data=[go.Candlestick(x=df['Date'], open=df['Open'], high=df['High'], low=df['Low'], close=df['Close'], increasing_line_color='#00ff00', decreasing_line_color='#ff3333')])
+    # Live Market Chart (Full Width)
+    st.markdown('<div class="card"><div class="card-header">Live Market Price Action</div>', unsafe_allow_html=True)
+
+    if 'Open' in df.columns:
+        fig = go.Figure(data=[go.Candlestick(
+            x=df['Date'],
+            open=df['Open'],
+            high=df['High'],
+            low=df['Low'],
+            close=df['Close'],
+            increasing_line_color='#26a69a',
+            decreasing_line_color='#ef5350',
+            increasing_fillcolor='#26a69a',
+            decreasing_fillcolor='#ef5350'
+        )])
+    else:
+        fig = px.line(df, x='Date', y='Close')
+
+    fig.update_layout(
+        height=450,
+        margin=dict(l=20, r=20, t=10, b=20),
+        paper_bgcolor='#0d0d0d',
+        plot_bgcolor='#0d0d0d',
+        font=dict(color="#999"),
+        xaxis=dict(
+            showgrid=True,
+            gridcolor='#1a1a1a',
+            rangeslider_visible=False,
+            zeroline=False,
+            color='#666'
+        ),
+        yaxis=dict(
+            showgrid=True,
+            gridcolor='#1a1a1a',
+            zeroline=False,
+            color='#666'
+        ),
+        hovermode='x unified'
+    )
+
+    st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
+    st.markdown("</div>", unsafe_allow_html=True)
+
+    # Ticker Tape
+    @st.cache_data(ttl=300)
+    def fetch_ticker_content(symbol, label):
+        stock = yf.Ticker(symbol)
+        hist = stock.history(period="5d")
+
+        price_part = f"{label} • PRICE N/A"
+        if not hist.empty:
+            curr = hist['Close'].iloc[-1]
+            prev = hist['Close'].iloc[-2] if len(hist) > 1 else curr
+            chg = ((curr - prev) / prev) * 100
+            arrow = "▲" if chg >= 0 else "▼"
+            col = "#26a69a" if chg >= 0 else "#ef5350"
+
+            price_part = (
+                f"<span style='color:#666'>{label}</span> "
+                f"<span style='color:#fff'>₹{curr:,.2f}</span> "
+                f"<span style='color:{col}'>{arrow} {abs(chg):.2f}%</span>"
+            )
+
+        company_name = COMPANY_NAMES.get(symbol, label)
+        news_list = fetch_company_news(symbol, company_name)
+
+        if news_list and news_list[0] != "News unavailable":
+            news_part = " | " + " • ".join(news_list[:3])
         else:
-            fig = px.line(df, x='Date', y='Close', title="Price History")
-        
-        fig.update_layout(height=350, margin=dict(l=10, r=10, t=10, b=10), paper_bgcolor='#1c1f26', plot_bgcolor='#1c1f26', font=dict(color="#eee"), xaxis_rangeslider_visible=False, xaxis=dict(showgrid=True, gridcolor='#333'), yaxis=dict(showgrid=True, gridcolor='#333'))
-        st.plotly_chart(fig, use_container_width=True)
-        st.markdown("</div>", unsafe_allow_html=True)
+            news_part = " | No fresh headlines"
 
-    # --- 7. TICKER ---
-    @st.cache_data(ttl=300) 
-    def fetch_selected_ticker_content(symbol, name):
-        try:
-            stock = yf.Ticker(symbol)
-            hist = stock.history(period="5d")
-            price_str = ""
-            if not hist.empty:
-                curr = hist['Close'].iloc[-1]
-                prev = hist['Close'].iloc[-2] if len(hist) > 1 else hist['Open'].iloc[-1]
-                chg = ((curr - prev) / prev) * 100
-                arrow = "▲" if chg >= 0 else "▼"
-                col = "#00ff00" if chg >= 0 else "#ff3333"
-                price_str = f"🔴 {name} LIVE: <span style='color:{col}'>₹{curr:,.2f} ({arrow} {chg:.2f}%)</span>"
-            else:
-                price_str = f"🔴 {name}: PRICE N/A"
-            
-            news_str = ""
-            try:
-                news_list = stock.news
-                if news_list:
-                    headlines = []
-                    for n in news_list[:5]:
-                        title = n.get('title') or n.get('headline')
-                        if title: headlines.append(title)
-                    if headlines:
-                        news_str = "   &nbsp;&nbsp;&nbsp;  📰  NEWS: " + "  •  ".join(headlines)
-            except Exception:
-                pass 
-            
-            if not news_str:
-                news_str = "   &nbsp;&nbsp;&nbsp;  📰  NEWS: Check local news sources."
+        return price_part + news_part
 
-            return f"{price_str} {news_str}"
-        except Exception as e:
-            return f"🔴 {name}: Data Unavailable"
+    tape_content = fetch_ticker_content(selected_ticker, selected_label)
+    full_tape = tape_content + "   " + tape_content
 
-    tape_content = fetch_selected_ticker_content(selected_ticker, selected_label)
-    full_tape = (tape_content + "   &nbsp;&nbsp;&nbsp;   ") * 5 
-    st.markdown(f"""<div class="ticker-wrap"><div class="ticker-content">{full_tape}</div></div>""", unsafe_allow_html=True)
-    st.markdown("<br><br>", unsafe_allow_html=True)
-
-else:
-    # Error state if no data found
-    st.error(f"Unable to fetch data for {selected_label} ({selected_ticker}). The market API might be temporarily down. Please try again later.")
+    st.markdown(f"""
+    <div class="ticker-wrap">
+        <div class="ticker-content">{full_tape}</div>
+    </div>
+    """, unsafe_allow_html=True)
