@@ -797,8 +797,6 @@ if not df.empty:
                 try:
                     live_ratios = {
                         "P/E Ratio": info.get('trailingPE', 0),
-                        "Forward P/E": info.get('forwardPE', 0),
-                        "Price/Book": info.get('priceToBook', 0),
                         "Debt/Equity": info.get('debtToEquity', 0),
                         "Current Ratio": info.get('currentRatio', 0)
                     }
@@ -1165,5 +1163,6 @@ if not df.empty:
         <div class="ticker-content">{full_tape}</div>
     </div>
     """, unsafe_allow_html=True)
+
 
 
