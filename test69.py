@@ -28,6 +28,34 @@ COMPANY_NAMES = {
     "MOIL.NS": "MOIL Limited",
     "JINDALSAW.NS": "Jindal SAW"
 }
+# IPO Metadata (Static – reliable for Indian markets)
+IPO_DATA = {
+    "TATASTEEL.NS": {
+        "ipo_price": 610,
+        "listing_date": "02-Feb-2011"
+    },
+    "SAIL.NS": {
+        "ipo_price": 68,
+        "listing_date": "1997-12-05"
+    },
+    "HINDALCO.NS": {
+        "ipo_price": 140,
+        "listing_date": "1995-01-08"
+    },
+    "NMDC.NS": {
+        "ipo_price": 300,
+        "listing_date": "30-Mar-2010"
+    },
+    "MOIL.NS": {
+        "ipo_price": 375,
+        "listing_date": "2010-12-01"
+    },
+    "JINDALSAW.NS": {
+        "ipo_price": 40,
+        "listing_date": "2003-06-30"
+    }
+}
+
 
 # Static Data with added ROE fallbacks
 STATIC_DATA = {
@@ -170,166 +198,206 @@ st.set_page_config(
     page_icon="⛏️"
 )
 
-# IMPROVED AESTHETIC CSS - TradingView Style
 st.markdown("""
 <style>
-    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+
+* { 
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif; 
+}
+
+.stApp { 
+    background-color: #0b0b0b; 
+}
+
+#MainMenu, footer, header { 
+    visibility: hidden; 
+}
+
+section[data-testid="stSidebar"] { 
+    display: none; 
+}
+
+/* =========================
+   CARD SYSTEM
+========================= */
+
+.card {
+    background: linear-gradient(145deg, #131313, #0f0f0f);
+    border: 1px solid #1a1a1a;
+    border-radius: 8px;
+    padding: 20px;
+    margin-bottom: 20px;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+}
+
+.card-header {
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.8px;
+    color: #666;
+    margin-bottom: 16px;
+    padding-bottom: 10px;
+    border-bottom: 1px solid #1a1a1a;
+}
+
+/* =========================
+   CONTROL BAR (FLAT)
+========================= */
+
+.control-bar {
+    position: sticky;
+    top: 0;
+    z-index: 999;
     
-    * { font-family: 'Inter', -apple-system, sans-serif; }
-    .stApp { background-color: #0b0b0b; }
-    #MainMenu, footer, header { visibility: hidden; }
-    section[data-testid="stSidebar"] { display: none; }
+    background: linear-gradient(180deg, #0b0b0b 70%, rgba(11,11,11,0.95));
+    border-bottom: 1px solid #1a1a1a;
     
-    /* Card System */
-    .card {
-        background: linear-gradient(145deg, #131313, #0f0f0f);
-        border: 1px solid #1a1a1a;
-        border-radius: 8px;
-        padding: 20px;
-        margin-bottom: 20px;
-        box-shadow: 0 4px 12px rgba(0,0,0,0.4);
-    }
-    
-    .card-header {
-        font-size: 11px;
-        font-weight: 600;
-        text-transform: uppercase;
-        letter-spacing: 0.8px;
-        color: #666;
-        margin-bottom: 16px;
-        padding-bottom: 10px;
-        border-bottom: 1px solid #1a1a1a;
-    }
-    
-    /* Control Bar */
-    .control-bar {
-        background: linear-gradient(135deg, #131313, #0f0f0f);
-        border: 1px solid #1a1a1a;
-        border-radius: 8px;
-        padding: 20px 24px;
-        margin-bottom: 24px;
-        box-shadow: 0 4px 12px rgba(0,0,0,0.3);
-    }
-    
-    /* Metrics */
-    .metric-row {
-        display: flex;
-        justify-content: space-around;
-        margin: 16px 0;
-    }
-    
-    .metric-box {
-        text-align: center;
-        padding: 12px;
-        background-color: #0d0d0d;
-        border-radius: 6px;
-        border: 1px solid #1a1a1a;
-        flex: 1;
-        margin: 0 6px;
-    }
-    
-    .metric-val {
-        font-size: 20px;
-        font-weight: 700;
-        color: #fff;
-        margin-bottom: 4px;
-    }
-    
-    .metric-lbl {
-        font-size: 10px;
-        font-weight: 500;
-        text-transform: uppercase;
-        letter-spacing: 0.5px;
-        color: #666;
-    }
-    
-    /* Ticker Tape */
-    .ticker-wrap {
-        position: fixed;
-        bottom: 0;
-        left: 0;
-        width: 100%;
-        height: 36px;
-        background-color: #080808;
-        border-top: 1px solid #1a1a1a;
-        z-index: 999999;
-        overflow: hidden;
-        display: flex;
-        align-items: center;
-    }
-    
-    .ticker-content {
-        display: inline-block;
-        font-size: 13px;
-        font-weight: 500;
-        color: #999;
-        white-space: nowrap;
-        padding-left: 100%;
-        animation: ticker-scroll 60s linear infinite;
-    }
-    
-    @keyframes ticker-scroll {
-        0% { transform: translateX(0); }
-        100% { transform: translateX(-50%); }
-    }
-    
-    /* Streamlit Widget Styling */
-    .stSelectbox > div > div {
-        background-color: #0d0d0d !important;
-        border: 1px solid #262626 !important;
-        color: #fff !important;
-    }
-    
-    .stRadio > div { background-color: transparent !important; }
-    
-    .stRadio label {
-        color: #999 !important;
-        font-size: 13px !important;
-        font-weight: 500 !important;
-    }
-    
-    .stSlider > div > div { background-color: #0d0d0d !important; }
-    .stSlider span { color: #fff !important; }
-    
-    .stButton > button {
-        background-color: #1a1a1a;
-        color: #26a69a;
-        border: 1px solid #262626;
-        border-radius: 6px;
-        padding: 10px 20px;
-        font-weight: 600;
-        font-size: 13px;
-        transition: all 0.2s;
-    }
-    
-    .stButton > button:hover {
-        background-color: #262626;
-        border-color: #26a69a;
-    }
-    
-    /* Tab Styling */
-    .stTabs [data-baseweb="tab-list"] {
-        gap: 8px;
-        background-color: #0d0d0d;
-        padding: 8px;
-        border-radius: 8px;
-    }
-    
-    .stTabs [data-baseweb="tab"] {
-        background-color: #131313;
-        border: 1px solid #1a1a1a;
-        color: #999;
-        border-radius: 6px;
-        padding: 8px 16px;
-    }
-    
-    .stTabs [aria-selected="true"] {
-        background-color: #1a1a1a;
-        color: #26a69a;
-        border-color: #26a69a;
-    }
+    padding: 14px 0 12px 0;
+    margin-bottom: 24px;
+}
+
+
+/* =========================
+   METRICS
+========================= */
+
+.metric-row {
+    display: flex;
+    justify-content: space-around;
+    margin: 16px 0;
+}
+
+.metric-box {
+    flex: 1;
+    text-align: center;
+    padding: 12px;
+    background-color: #0d0d0d;
+    border-radius: 6px;
+    border: 1px solid #1a1a1a;
+    margin: 0 6px;
+}
+
+.metric-val {
+    font-size: 20px;
+    font-weight: 700;
+    color: #ffffff;
+    margin-bottom: 4px;
+}
+
+.metric-lbl {
+    font-size: 10px;
+    font-weight: 500;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: #666;
+}
+
+/* =========================
+   TABS
+========================= */
+
+.stTabs [data-baseweb="tab-list"] {
+    gap: 8px;
+    background-color: #0d0d0d;
+    padding: 8px;
+    border-radius: 8px;
+}
+
+.stTabs [data-baseweb="tab"] {
+    background-color: #131313;
+    border: 1px solid #1a1a1a;
+    color: #999;
+    border-radius: 6px;
+    padding: 8px 16px;
+}
+
+.stTabs [aria-selected="true"] {
+    background-color: #1a1a1a;
+    color: #26a69a;
+    border-color: #26a69a;
+}
+
+/* =========================
+   WIDGETS
+========================= */
+
+.stSelectbox > div > div {
+    background-color: #0d0d0d !important;
+    border: 1px solid #262626 !important;
+    color: #ffffff !important;
+}
+
+.stRadio > div { 
+    background-color: transparent !important; 
+}
+
+.stRadio label {
+    color: #999 !important;
+    font-size: 13px !important;
+    font-weight: 500 !important;
+}
+
+.stSlider > div > div { 
+    background-color: #0d0d0d !important; 
+}
+
+.stSlider span { 
+    color: #ffffff !important; 
+}
+
+.stButton > button {
+    background-color: #1a1a1a;
+    color: #26a69a;
+    border: 1px solid #262626;
+    border-radius: 6px;
+    padding: 10px 20px;
+    font-weight: 600;
+    font-size: 13px;
+    transition: all 0.2s;
+}
+
+.stButton > button:hover {
+    background-color: #262626;
+    border-color: #26a69a;
+}
+
+/* =========================
+   TICKER TAPE
+========================= */
+
+.ticker-wrap {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    width: 100%;
+    height: 36px;
+    background-color: #080808;
+    border-top: 1px solid #1a1a1a;
+    z-index: 999999;
+    overflow: hidden;
+    display: flex;
+    align-items: center;
+}
+
+.ticker-content {
+    display: inline-block;
+    font-size: 13px;
+    font-weight: 500;
+    color: #999;
+    white-space: nowrap;
+    padding-left: 100%;
+    animation: ticker-scroll 60s linear infinite;
+}
+
+@keyframes ticker-scroll {
+    0% { transform: translateX(0); }
+    100% { transform: translateX(-50%); }
+}
 </style>
 """, unsafe_allow_html=True)
+
 
 # -----------------------------------------------------------------------------
 # HELPER FUNCTIONS
@@ -525,21 +593,58 @@ def run_analytics(df, days_forecast):
         'Lag_2': last['Lag_1']
     }])
 
-    future_price = (rf.predict(future_X)[0] + nn.predict(future_X)[0]) / 2
+    rf_future = rf.predict(future_X)[0]
+    nn_future = nn.predict(future_X)[0]
+    future_price = (rf_future + nn_future) / 2
+
+    # --- Confidence Band Calculation ---
+    ensemble_preds = (rf_pred + nn_pred) / 2
+    error_std = np.std(y_test.values - ensemble_preds)
+
+    low_price = future_price - error_std
+    high_price = future_price + error_std
+
 
     return {
-        "dates": test_dates,
-        "actual": y_test.values,
-        "rf_pred": rf_pred,
-        "nn_pred": nn_pred,
-        "future_price": future_price,
-        "metrics": metrics
+    "dates": test_dates,
+    "actual": y_test.values,
+    "rf_pred": rf_pred,
+    "nn_pred": nn_pred,
+    "future_price": future_price,
+    "low_price": low_price,
+    "high_price": high_price,
+    "metrics": metrics
     }
+
 
 
 # -----------------------------------------------------------------------------
 # MAIN APP
 # -----------------------------------------------------------------------------
+st.markdown("""
+<div style="
+    text-align: center;
+    margin: 8px 0 16px 0;
+">
+    <div style="
+        font-size: 30px;
+        font-weight: 700;
+        color: #ffffff;
+        line-height: 1.25;
+        letter-spacing: 0.4px;
+    ">
+        AI-Driven Financial Analytics Dashboard for the Indian Metals and Mining Sector
+    </div>
+    <div style="
+        font-size: 13px;
+        color: #8c8c8c;
+        margin-top: 4px;
+    ">
+        Market Data • Fundamental Analysis • Machine Learning Forecasting
+    </div>
+</div>
+""", unsafe_allow_html=True)
+
 st.markdown('<div class="control-bar">', unsafe_allow_html=True)
 
 c1, c2, c3 = st.columns([1.4, 2.8, 1.6])
@@ -561,6 +666,8 @@ with c3:
     days = st.slider("Forecast Days", 1, 30, 7)
 
 st.markdown("</div>", unsafe_allow_html=True)
+st.markdown("<div style='height: 8px;'></div>", unsafe_allow_html=True)
+
 
 selected_label = comp_map[selected_ticker]
 
@@ -570,9 +677,20 @@ with st.spinner('Fetching real-time market data...'):
     
 static_vals = STATIC_DATA.get(selected_ticker, {})
 analysis_vals = ANALYSIS_DATA.get(selected_ticker, {})
+ipo_vals = IPO_DATA.get(selected_ticker, {})
 
 # CALCULATE SMART ROE
 smart_roe = calculate_smart_roe(info, selected_ticker)
+# KPI Color Logic for ROE
+roe_pct = smart_roe * 100
+
+if roe_pct > 15:
+    roe_color = "#26a69a"   # Green
+elif roe_pct >= 8:
+    roe_color = "#ffa726"   # Amber
+else:
+    roe_color = "#ef5350"   # Red
+
 
 # Main Content
 if not df.empty:
@@ -706,7 +824,7 @@ if not df.empty:
                             title={'text': title, 'font': {'size': 14, 'color': '#999'}}, 
                             gauge={
                                 'axis': {'range': [min_v, max_v]}, 
-                                'bar': {'color': "#26a69a"}, 
+                                'bar': {'color': roe_color}, 
                                 'bgcolor': "#1a1a1a", 
                                 'borderwidth': 2, 
                                 'bordercolor': "#1a1a1a"
@@ -788,12 +906,34 @@ if not df.empty:
                 <div class="metric-lbl">Open Price</div>
             </div>
             <div class="metric-box">
-                <div class="metric-val">{f"{smart_roe*100:.2f}%"}</div>
+                <div class="metric-val" style="color:{roe_color};">{roe_pct:.2f}%</div>
                 <div class="metric-lbl">ROE %</div>
-            </div>
+
         </div>
         """, unsafe_allow_html=True)
         st.markdown("</div>", unsafe_allow_html=True)
+
+        # IPO Information
+        st.markdown('<div class="card"><div class="card-header">IPO Information</div>', unsafe_allow_html=True)
+
+        ipo_price = ipo_vals.get("ipo_price", "N/A")
+        listing_date = ipo_vals.get("listing_date", "N/A")
+
+        st.markdown(f"""
+        <div class="metric-row">
+            <div class="metric-box">
+            <div class="metric-val">₹{ipo_price}</div>
+            <div class="metric-lbl">IPO Price</div>
+            </div>
+        <div class="metric-box">
+        <div class="metric-val">{listing_date}</div>
+        <div class="metric-lbl">Listing Date</div>
+        </div>
+        </div>
+        """, unsafe_allow_html=True)
+
+        st.markdown("</div>", unsafe_allow_html=True)
+
 
     with right_col:
         # AI Forecast
@@ -809,6 +949,18 @@ if not df.empty:
             <div style="color:#999; font-size: 14px;">Target Price: <b style="color:#fff;">₹{pred_price:,.2f}</b></div>
         </div>
         """, unsafe_allow_html=True)
+        low_p = ml_output["low_price"]
+        high_p = ml_output["high_price"]
+
+        st.markdown(f"""
+        <div style="margin-top: 12px; font-size: 13px; color: #999;">
+        <b>Scenario Range:</b><br>
+        🔻 Low: ₹{low_p:,.2f} &nbsp;&nbsp;|&nbsp;&nbsp;
+        ⚖️ Base: ₹{pred_price:,.2f} &nbsp;&nbsp;|&nbsp;&nbsp;
+        🔺 High: ₹{high_p:,.2f}
+        </div>
+        """, unsafe_allow_html=True)
+
         
         # Model Performance Heatmap
         hm_z = [[metrics['NN_RMSE'], metrics['NN_MAPE']], [metrics['RF_RMSE'], metrics['RF_MAPE']]]
@@ -830,6 +982,18 @@ if not df.empty:
             yaxis=dict(tickfont=dict(color='#999'))
         )
         st.plotly_chart(fig_hm, use_container_width=True, config={'displayModeBar': False})
+        st.markdown("""
+        <div style="
+        margin-top: 10px;
+        font-size: 12px;
+        color: #8c8c8c;
+        text-align: center;
+        ">
+        <b>Model Strategy:</b> Final forecast generated using an <b>Ensemble</b> of
+        Random Forest and Neural Network models to reduce variance and improve robustness.
+        </div>
+        """, unsafe_allow_html=True)
+
         st.markdown("</div>", unsafe_allow_html=True)
 
         st.markdown("""
