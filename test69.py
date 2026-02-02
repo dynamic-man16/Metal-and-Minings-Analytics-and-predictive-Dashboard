@@ -34,26 +34,14 @@ IPO_DATA = {
         "ipo_price": 610,
         "listing_date": "02-Feb-2011"
     },
-    "SAIL.NS": {
-        "ipo_price": 68,
-        "listing_date": "1997-12-05"
-    },
-    "HINDALCO.NS": {
-        "ipo_price": 140,
-        "listing_date": "1995-01-08"
-    },
     "NMDC.NS": {
         "ipo_price": 300,
         "listing_date": "30-Mar-2010"
     },
     "MOIL.NS": {
         "ipo_price": 375,
-        "listing_date": "2010-12-01"
+        "listing_date": "15-Dec-2010"
     },
-    "JINDALSAW.NS": {
-        "ipo_price": 40,
-        "listing_date": "2003-06-30"
-    }
 }
 
 
@@ -1176,3 +1164,4 @@ if not df.empty:
         <div class="ticker-content">{full_tape}</div>
     </div>
     """, unsafe_allow_html=True)
+
