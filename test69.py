@@ -548,16 +548,22 @@ def run_analytics(df, days_forecast):
     df['Date'] = pd.to_datetime(df['Date'])
 
     # -----------------------------
-    # LOG RETURNS (TARGET)
+    # 1. LOG RETURNS (TARGET)
     # -----------------------------
+    # Target: Return at Time T
     df['returns'] = np.log(df['Close'] / df['Close'].shift(1))
 
     # -----------------------------
-    # FEATURES (NO DATE LEAKAGE)
+    # 2. FEATURES (FINANCIALLY CORRECTED)
     # -----------------------------
-    df['MA_50'] = df['Close'].rolling(50).mean()
-    df['EMA_20'] = df['Close'].ewm(span=20, adjust=False).mean()
-    df['RSI'] = calculate_rsi(df['Close'])
+    ma_50 = df['Close'].rolling(50).mean()
+    ema_20 = df['Close'].ewm(span=20, adjust=False).mean()
+    rsi_series = calculate_rsi(df['Close'])
+
+    # Shift features to use T-1 data for Time T prediction
+    df['MA_50'] = ma_50.shift(1)
+    df['EMA_20'] = ema_20.shift(1)
+    df['RSI'] = rsi_series.shift(1)
     df['Lag_1'] = df['returns'].shift(1)
     df['Lag_2'] = df['returns'].shift(2)
 
@@ -578,20 +584,10 @@ def run_analytics(df, days_forecast):
     # -----------------------------
     # MODELS
     # -----------------------------
-    rf = RandomForestRegressor(
-        n_estimators=200,
-        min_samples_leaf=5,
-        random_state=42
-    )
-
+    rf = RandomForestRegressor(n_estimators=200, min_samples_leaf=5, random_state=42)
     nn = make_pipeline(
         StandardScaler(),
-        MLPRegressor(
-            hidden_layer_sizes=(64, 32),
-            max_iter=600,
-            alpha=0.001,
-            random_state=42
-        )
+        MLPRegressor(hidden_layer_sizes=(64, 32), max_iter=600, alpha=0.001, random_state=42)
     )
 
     rf.fit(X_train, y_train)
@@ -601,99 +597,105 @@ def run_analytics(df, days_forecast):
     nn_pred = nn.predict(X_test)
 
     # -----------------------------
-    # METRICS (RETURNS + DIRECTION)
+    # METRICS
     # -----------------------------
     rf_rmse = np.sqrt(mean_squared_error(y_test, rf_pred))
     nn_rmse = np.sqrt(mean_squared_error(y_test, nn_pred))
 
     metrics = {
-    "RF_RMSE": rf_rmse,
-    "NN_RMSE": nn_rmse,
-
-    # true errors
-    "RF_MAE": np.mean(np.abs(rf_pred - y_test)),
-    "NN_MAE": np.mean(np.abs(nn_pred - y_test)),
-
-    # 🔧 UI COMPATIBILITY (MAPE proxy)
-    "RF_MAPE": np.mean(np.abs(rf_pred - y_test)) * 100,
-    "NN_MAPE": np.mean(np.abs(nn_pred - y_test)) * 100,
-
-    "DIRECTION_ACCURACY": (
-        np.mean(np.sign(rf_pred) == np.sign(y_test)) * 100
-    )
-}
-
+        "RF_RMSE": rf_rmse,
+        "NN_RMSE": nn_rmse,
+        "RF_MAPE": np.mean(np.abs(rf_pred - y_test)) * 100,
+        "NN_MAPE": np.mean(np.abs(nn_pred - y_test)) * 100,
+    }
 
     # -----------------------------
-    # 🔁 ROLLING LOG-RETURN FORECAST
+    # 🔒 VOLATILITY-BASED SAFETY
+    # -----------------------------
+    daily_vol = np.std(y_train)
+    max_daily_move = 3 * daily_vol  # 3σ cap (Prevents 100% spikes)
+    
+    # 🔥 REMOVED THE DAMPING FACTOR (Was 0.7, Now 1.0)
+    # This allows the model to predict full moves.
+    
+    # -----------------------------
+    # 🔁 ROLLING FORECAST (With Future Dates)
     # -----------------------------
     temp_df = df.copy()
-    predicted_returns = []
-
-    for _ in range(days_forecast):
-        last = temp_df.iloc[-1]
+    future_prices = []
+    future_dates = []
+    
+    current_date = df['Date'].iloc[-1]
+    
+    for i in range(days_forecast):
+        # Generate Features based on the LATEST appended data
+        last_ma = temp_df['Close'].rolling(50).mean().iloc[-1]
+        last_ema = temp_df['Close'].ewm(span=20, adjust=False).mean().iloc[-1]
+        last_rsi = calculate_rsi(temp_df['Close']).iloc[-1]
+        last_lag1 = temp_df['returns'].iloc[-1]
+        last_lag2 = temp_df['returns'].iloc[-2]
 
         future_X = pd.DataFrame([{
-            'MA_50': temp_df['Close'].rolling(50).mean().iloc[-1],
-            'EMA_20': temp_df['Close'].ewm(span=20, adjust=False).mean().iloc[-1],
-            'RSI': calculate_rsi(temp_df['Close']).iloc[-1],
-            'Lag_1': last['returns'],
-            'Lag_2': temp_df['returns'].iloc[-2]
+            'MA_50': last_ma,
+            'EMA_20': last_ema,
+            'RSI': last_rsi,
+            'Lag_1': last_lag1,
+            'Lag_2': last_lag2
         }])
 
         rf_ret = rf.predict(future_X)[0]
         nn_ret = nn.predict(future_X)[0]
 
-        # 🔥 WEIGHTED ENSEMBLE (LOWER ERROR)
+        # Weighted Ensemble
         w_rf = 1 / (rf_rmse + 1e-6)
         w_nn = 1 / (nn_rmse + 1e-6)
+        raw_ret = (w_rf * rf_ret + w_nn * nn_ret) / (w_rf + w_nn)
 
-        next_ret = (w_rf * rf_ret + w_nn * nn_ret) / (w_rf + w_nn)
-        predicted_returns.append(next_ret)
+        # Clip extreme volatility only
+        next_ret = np.clip(raw_ret, -max_daily_move, max_daily_move)
 
-        next_price = last['Close'] * np.exp(next_ret)
+        # Calculate Price
+        last_close = temp_df['Close'].iloc[-1]
+        next_price = last_close * np.exp(next_ret)
 
-        new_row = last.copy()
+        # Store for Plotting
+        current_date += timedelta(days=1)
+        # Skip weekends for plotting realism (optional, kept simple here)
+        if current_date.weekday() >= 5: 
+            current_date += timedelta(days=2)
+            
+        future_prices.append(next_price)
+        future_dates.append(current_date)
+
+        # Update dataframe for next loop
+        new_row = temp_df.iloc[-1].copy()
+        new_row['Date'] = current_date
         new_row['returns'] = next_ret
         new_row['Close'] = next_price
-
-        temp_df = pd.concat(
-            [temp_df, new_row.to_frame().T],
-            ignore_index=True
-        )
+        
+        temp_df = pd.concat([temp_df, new_row.to_frame().T], ignore_index=True)
 
     # -----------------------------
-    # FINAL PRICE (COMPOUNDED)
+    # FINAL OUTPUTS
     # -----------------------------
-    last_price = df['Close'].iloc[-1]
-    future_price = last_price * np.exp(np.sum(predicted_returns))
-
-    # -----------------------------
-    # CONFIDENCE BAND (SCALED)
-    # -----------------------------
+    future_price = future_prices[-1]
+    
+    # Confidence Band
     ret_std = np.std(y_test)
-    price_std = last_price * ret_std * np.sqrt(days_forecast)
+    price_std = df['Close'].iloc[-1] * ret_std * np.sqrt(days_forecast)
 
-    low_price = future_price - price_std
-    high_price = future_price + price_std
-
-    # -----------------------------
-    # RETURN FOR DASHBOARD
-    # -----------------------------
     return {
         "dates": test_dates,
         "actual": y_test.values,
         "rf_pred": rf_pred,
         "nn_pred": nn_pred,
         "future_price": future_price,
-        "low_price": low_price,
-        "high_price": high_price,
-        "metrics": metrics
+        "low_price": future_price - price_std,
+        "high_price": future_price + price_std,
+        "metrics": metrics,
+        "future_dates": future_dates,   # NEW
+        "future_prices": future_prices  # NEW
     }
-
-
-
-
 
 
 # -----------------------------------------------------------------------------
@@ -774,18 +776,82 @@ else:
 if not df.empty:
     ml_output = run_analytics(df, days)
     # =================================================
-    # 🔥 RETURNS → PRICE (FOR ACTUAL vs PREDICTED PLOTS)
+    # ✅ FIXED: DYNAMICALLY ALIGN SIZES
     # =================================================
-    split = int(len(df) * 0.85)
+    
+    # 1. Get the exact size of the test set from the model output
+    n_test = len(ml_output["rf_pred"])
 
-    # base prices aligned with test set
-    base_prices = df['Close'].iloc[
-    split : split + len(ml_output["actual"])
-    ].values
+    # 2. ACTUAL PRICES: Get the last 'n' closing prices from the dataframe
+    #    This ensures we match the model's test set perfectly.
+    actual_price = df['Close'].iloc[-n_test:].values
 
-    actual_price = base_prices * np.exp(ml_output["actual"])
-    rf_price = base_prices * np.exp(ml_output["rf_pred"])
-    nn_price = base_prices * np.exp(ml_output["nn_pred"])
+    # 3. PREVIOUS PRICES: Get the 'n' prices immediately BEFORE the actuals.
+    #    We need these to calculate: Price_Today = Price_Yesterday * exp(Return)
+    #    Logic: Take the last n+1 rows, but exclude the very last one.
+    prev_prices = df['Close'].iloc[-(n_test + 1) : -1].values
+
+    # 4. CALCULATE PREDICTED PRICES
+    rf_price = prev_prices * np.exp(ml_output["rf_pred"])
+    nn_price = prev_prices * np.exp(ml_output["nn_pred"])
+    st.markdown("""
+    <div class="card">
+    <div class="card-header">AI FORECAST TRAJECTORY (Next 30 Days)</div>
+    """, unsafe_allow_html=True)
+    
+    # Combine Historical Data (Last 60 days) + Future Data
+    hist_len = 60
+    recent_dates = df['Date'].iloc[-hist_len:].values
+    recent_prices = df['Close'].iloc[-hist_len:].values
+    
+    future_dates = ml_output["future_dates"]
+    future_prices = ml_output["future_prices"]
+    
+    # Create Main Chart
+    fig_future = go.Figure()
+    
+    # 1. Historical Data
+    fig_future.add_trace(go.Scatter(
+        x=recent_dates,
+        y=recent_prices,
+        mode="lines",
+        name="Historical Price",
+        line=dict(color="#cccccc", width=2)
+    ))
+    
+    # 2. Connection Line (Connect last history to first future)
+    fig_future.add_trace(go.Scatter(
+        x=[recent_dates[-1], future_dates[0]],
+        y=[recent_prices[-1], future_prices[0]],
+        mode="lines",
+        showlegend=False,
+        line=dict(color="#ffd700", width=2, dash="dot")
+    ))
+    
+    # 3. Future Forecast
+    fig_future.add_trace(go.Scatter(
+        x=future_dates,
+        y=future_prices,
+        mode="lines+markers",
+        name=f"AI Forecast ({days} Days)",
+        marker=dict(size=4),
+        line=dict(color="#ffd700", width=2, dash="dot")
+    ))
+
+    fig_future.update_layout(
+        height=350,
+        paper_bgcolor="#111",
+        plot_bgcolor="#111",
+        font=dict(color="#ddd"),
+        margin=dict(l=20, r=20, t=30, b=20),
+        legend=dict(orientation="h", y=-0.15),
+        hovermode="x unified"
+    )
+    
+    st.plotly_chart(fig_future, use_container_width=True)
+    st.markdown("</div>", unsafe_allow_html=True)
+
+    # ... (Keep your existing Backtest charts below if you want) ...
 
     if ml_output is None:
         st.warning("Not enough data for ML prediction comparison.")
