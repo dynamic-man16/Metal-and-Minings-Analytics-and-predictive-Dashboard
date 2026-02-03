@@ -17,7 +17,6 @@ import requests
 # CONFIGURATION & CONSTANTS
 # -----------------------------------------------------------------------------
 
-# Ideally, put this in st.secrets, but keeping here for your ease of running
 NEWS_API_KEY = "d3d096e3894b496b8302a4e555c1f105"
 
 COMPANY_NAMES = {
@@ -34,6 +33,14 @@ IPO_DATA = {
         "ipo_price": 610,
         "listing_date": "02-Feb-2011"
     },
+    "SAIL.NS": {
+        "ipo_price": 68,
+        "listing_date": "1997-12-05"
+    },
+    "HINDALCO.NS": {
+        "ipo_price": 140,
+        "listing_date": "1995-01-08"
+    },
     "NMDC.NS": {
         "ipo_price": 300,
         "listing_date": "30-Mar-2010"
@@ -42,7 +49,10 @@ IPO_DATA = {
         "ipo_price": 375,
         "listing_date": "2010-12-01"
     },
-   
+    "JINDALSAW.NS": {
+        "ipo_price": 40,
+        "listing_date": "2003-06-30"
+    }
 }
 
 
@@ -528,33 +538,60 @@ def calculate_rsi(data, window=14):
 
 
 def run_analytics(df, days_forecast):
-    if len(df) < 50 or df['Close'].std() == 0:
-        df = df.copy()
-        df['Close'] = df['Close'].ffill() # Updated deprecated method
-        df['Close'] += np.random.normal(0, 0.001, len(df))
+    # -----------------------------
+    # SAFETY CHECKS
+    # -----------------------------
+    if len(df) < 60 or df['Close'].std() == 0:
+        return None
 
     df = df.copy()
     df['Date'] = pd.to_datetime(df['Date'])
-    df['Date_Ordinal'] = df['Date'].apply(lambda x: x.toordinal())
-    df['MA_50'] = df['Close'].rolling(50).mean().bfill()
+
+    # -----------------------------
+    # LOG RETURNS (TARGET)
+    # -----------------------------
+    df['returns'] = np.log(df['Close'] / df['Close'].shift(1))
+
+    # -----------------------------
+    # FEATURES (NO DATE LEAKAGE)
+    # -----------------------------
+    df['MA_50'] = df['Close'].rolling(50).mean()
     df['EMA_20'] = df['Close'].ewm(span=20, adjust=False).mean()
-    df['RSI'] = calculate_rsi(df['Close']).fillna(50)
-    df['Lag_1'] = df['Close'].shift(1).bfill()
-    df['Lag_2'] = df['Close'].shift(2).bfill()
+    df['RSI'] = calculate_rsi(df['Close'])
+    df['Lag_1'] = df['returns'].shift(1)
+    df['Lag_2'] = df['returns'].shift(2)
 
-    features = ['Date_Ordinal', 'MA_50', 'EMA_20', 'RSI', 'Lag_1', 'Lag_2']
+    df = df.dropna()
+
+    features = ['MA_50', 'EMA_20', 'RSI', 'Lag_1', 'Lag_2']
     X = df[features]
-    y = df['Close']
+    y = df['returns']
 
+    # -----------------------------
+    # TRAIN / TEST SPLIT
+    # -----------------------------
     split = int(len(df) * 0.85)
     X_train, X_test = X.iloc[:split], X.iloc[split:]
     y_train, y_test = y.iloc[:split], y.iloc[split:]
     test_dates = df['Date'].iloc[split:]
 
-    rf = RandomForestRegressor(n_estimators=120, random_state=42)
+    # -----------------------------
+    # MODELS
+    # -----------------------------
+    rf = RandomForestRegressor(
+        n_estimators=200,
+        min_samples_leaf=5,
+        random_state=42
+    )
+
     nn = make_pipeline(
         StandardScaler(),
-        MLPRegressor(hidden_layer_sizes=(64, 32), max_iter=500, random_state=42)
+        MLPRegressor(
+            hidden_layer_sizes=(64, 32),
+            max_iter=600,
+            alpha=0.001,
+            random_state=42
+        )
     )
 
     rf.fit(X_train, y_train)
@@ -563,47 +600,99 @@ def run_analytics(df, days_forecast):
     rf_pred = rf.predict(X_test)
     nn_pred = nn.predict(X_test)
 
+    # -----------------------------
+    # METRICS (RETURNS + DIRECTION)
+    # -----------------------------
+    rf_rmse = np.sqrt(mean_squared_error(y_test, rf_pred))
+    nn_rmse = np.sqrt(mean_squared_error(y_test, nn_pred))
+
     metrics = {
-        "RF_RMSE": np.sqrt(mean_squared_error(y_test, rf_pred)),
-        "NN_RMSE": np.sqrt(mean_squared_error(y_test, nn_pred)),
-        "RF_MAPE": np.mean(np.abs((y_test - rf_pred) / y_test)) * 100,
-        "NN_MAPE": np.mean(np.abs((y_test - nn_pred) / y_test)) * 100
-    }
+    "RF_RMSE": rf_rmse,
+    "NN_RMSE": nn_rmse,
 
-    last = df.iloc[-1]
-    future_ord = last['Date_Ordinal'] + days_forecast
+    # true errors
+    "RF_MAE": np.mean(np.abs(rf_pred - y_test)),
+    "NN_MAE": np.mean(np.abs(nn_pred - y_test)),
 
-    future_X = pd.DataFrame([{
-        'Date_Ordinal': future_ord,
-        'MA_50': last['MA_50'],
-        'EMA_20': last['EMA_20'],
-        'RSI': last['RSI'],
-        'Lag_1': last['Close'],
-        'Lag_2': last['Lag_1']
-    }])
+    # 🔧 UI COMPATIBILITY (MAPE proxy)
+    "RF_MAPE": np.mean(np.abs(rf_pred - y_test)) * 100,
+    "NN_MAPE": np.mean(np.abs(nn_pred - y_test)) * 100,
 
-    rf_future = rf.predict(future_X)[0]
-    nn_future = nn.predict(future_X)[0]
-    future_price = (rf_future + nn_future) / 2
-
-    # --- Confidence Band Calculation ---
-    ensemble_preds = (rf_pred + nn_pred) / 2
-    error_std = np.std(y_test.values - ensemble_preds)
-
-    low_price = future_price - error_std
-    high_price = future_price + error_std
+    "DIRECTION_ACCURACY": (
+        np.mean(np.sign(rf_pred) == np.sign(y_test)) * 100
+    )
+}
 
 
+    # -----------------------------
+    # 🔁 ROLLING LOG-RETURN FORECAST
+    # -----------------------------
+    temp_df = df.copy()
+    predicted_returns = []
+
+    for _ in range(days_forecast):
+        last = temp_df.iloc[-1]
+
+        future_X = pd.DataFrame([{
+            'MA_50': temp_df['Close'].rolling(50).mean().iloc[-1],
+            'EMA_20': temp_df['Close'].ewm(span=20, adjust=False).mean().iloc[-1],
+            'RSI': calculate_rsi(temp_df['Close']).iloc[-1],
+            'Lag_1': last['returns'],
+            'Lag_2': temp_df['returns'].iloc[-2]
+        }])
+
+        rf_ret = rf.predict(future_X)[0]
+        nn_ret = nn.predict(future_X)[0]
+
+        # 🔥 WEIGHTED ENSEMBLE (LOWER ERROR)
+        w_rf = 1 / (rf_rmse + 1e-6)
+        w_nn = 1 / (nn_rmse + 1e-6)
+
+        next_ret = (w_rf * rf_ret + w_nn * nn_ret) / (w_rf + w_nn)
+        predicted_returns.append(next_ret)
+
+        next_price = last['Close'] * np.exp(next_ret)
+
+        new_row = last.copy()
+        new_row['returns'] = next_ret
+        new_row['Close'] = next_price
+
+        temp_df = pd.concat(
+            [temp_df, new_row.to_frame().T],
+            ignore_index=True
+        )
+
+    # -----------------------------
+    # FINAL PRICE (COMPOUNDED)
+    # -----------------------------
+    last_price = df['Close'].iloc[-1]
+    future_price = last_price * np.exp(np.sum(predicted_returns))
+
+    # -----------------------------
+    # CONFIDENCE BAND (SCALED)
+    # -----------------------------
+    ret_std = np.std(y_test)
+    price_std = last_price * ret_std * np.sqrt(days_forecast)
+
+    low_price = future_price - price_std
+    high_price = future_price + price_std
+
+    # -----------------------------
+    # RETURN FOR DASHBOARD
+    # -----------------------------
     return {
-    "dates": test_dates,
-    "actual": y_test.values,
-    "rf_pred": rf_pred,
-    "nn_pred": nn_pred,
-    "future_price": future_price,
-    "low_price": low_price,
-    "high_price": high_price,
-    "metrics": metrics
+        "dates": test_dates,
+        "actual": y_test.values,
+        "rf_pred": rf_pred,
+        "nn_pred": nn_pred,
+        "future_price": future_price,
+        "low_price": low_price,
+        "high_price": high_price,
+        "metrics": metrics
     }
+
+
+
 
 
 
@@ -684,6 +773,20 @@ else:
 # Main Content
 if not df.empty:
     ml_output = run_analytics(df, days)
+    # =================================================
+    # 🔥 RETURNS → PRICE (FOR ACTUAL vs PREDICTED PLOTS)
+    # =================================================
+    split = int(len(df) * 0.85)
+
+    # base prices aligned with test set
+    base_prices = df['Close'].iloc[
+    split : split + len(ml_output["actual"])
+    ].values
+
+    actual_price = base_prices * np.exp(ml_output["actual"])
+    rf_price = base_prices * np.exp(ml_output["rf_pred"])
+    nn_price = base_prices * np.exp(ml_output["nn_pred"])
+
     if ml_output is None:
         st.warning("Not enough data for ML prediction comparison.")
         st.stop()
@@ -991,20 +1094,21 @@ if not df.empty:
         fig_rf = go.Figure()
 
         fig_rf.add_trace(go.Scatter(
-            x=ml_output["dates"],
-            y=ml_output["actual"],
-            mode="lines",
-            name="Actual Price",
-            line=dict(color="#cccccc", width=2)
+        x=ml_output["dates"],
+        y=actual_price,
+        mode="lines",
+        name="Actual Price",
+        line=dict(color="#cccccc", width=2)
         ))
 
         fig_rf.add_trace(go.Scatter(
-            x=ml_output["dates"],
-            y=ml_output["rf_pred"],
-            mode="lines",
-            name="RF Predicted",
-            line=dict(color="#00ff00", width=2, dash="dot")
+        x=ml_output["dates"],
+        y=rf_price,
+        mode="lines",
+        name="RF Predicted",
+        line=dict(color="#00ff00", width=2, dash="dot")
         ))
+
 
         fig_rf.update_layout(
             height=280,
@@ -1027,7 +1131,7 @@ if not df.empty:
 
         fig_nn.add_trace(go.Scatter(
         x=ml_output["dates"],
-        y=ml_output["actual"],
+        y=actual_price,
         mode="lines",
         name="Actual Price",
         line=dict(color="#cccccc", width=2)
@@ -1035,11 +1139,12 @@ if not df.empty:
 
         fig_nn.add_trace(go.Scatter(
         x=ml_output["dates"],
-        y=ml_output["nn_pred"],
+        y=nn_price,
         mode="lines",
         name="NN Predicted",
         line=dict(color="#00ceff", width=2, dash="dot")
         ))
+
 
         fig_nn.update_layout(
         height=280,
@@ -1163,6 +1268,3 @@ if not df.empty:
         <div class="ticker-content">{full_tape}</div>
     </div>
     """, unsafe_allow_html=True)
-
-
-
